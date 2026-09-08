@@ -1,0 +1,32 @@
+{
+  "name": "packcheck-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "PackCheck AI — SIH 2026 PS26034 inspection platform foundation",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "dev:api": "npm run dev -w @packcheck/api",
+    "dev:ai": "npm run dev -w @packcheck/ai-service",
+    "dev:web": "npm run dev -w @packcheck/web",
+    "build:packages": "npm run build -w @packcheck/shared && npm run build -w @packcheck/db && npm run build -w @packcheck/rule-engine",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
+    "test": "npm run build:packages && npm run test --workspaces --if-present",
+    "build": "npm run build:packages && npm run build -w @packcheck/api && npm run build -w @packcheck/ai-service && npm run build -w @packcheck/web",
+    "db:generate": "npm run generate -w @packcheck/db",
+    "db:migrate": "npm run migrate -w @packcheck/db"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "version": "0.1.0",
+  "note": "Official URLs, document hashes, publication dates, and effective dates must be recorded after retrieval. Nothing in this file is ACTIVE.",
+  "sources": [
+    {
+      "title": "Legal Metrology Act, 2009",
+      "sourceType": "legislation",
+      "issuingAuthority": "Government of India",
+      "officialUrl": null,
+      "documentHash": null,
+      "publicationDate": null,
+      "effectiveDate": null,
+      "verificationStatus": "unverified"
+    },
+    {
+      "title": "Legal Metrology (Packaged Commodities) Rules, 2011",
+      "sourceType": "rules",
+      "issuingAuthority": "Department of Consumer Affairs",
+      "officialUrl": null,
+      "documentHash": null,
+      "publicationDate": null,
+      "effectiveDate": null,
+      "verificationStatus": "unverified"
+    },
+    {
+      "title": "Department of Consumer Affairs — Packaged Commodities rules and amendments",
+      "sourceType": "department_publication",
+      "issuingAuthority": "Department of Consumer Affairs",
+      "officialUrl": null,
+      "documentHash": null,
+      "publicationDate": null,
+      "effectiveDate": null,
+      "verificationStatus": "unverified"
+    },
+    {
+      "title": "Official Gazette / amendment notifications",
+      "sourceType": "gazette",
+      "issuingAuthority": "Government of India",
+      "officialUrl": null,
+      "documentHash": null,
+      "publicationDate": null,
+      "effectiveDate": null,
+      "verificationStatus": "unverified"
+    }
+  ]
+}

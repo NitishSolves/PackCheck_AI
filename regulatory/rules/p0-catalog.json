@@ -1,0 +1,141 @@
+{
+  "version": "0.1.0",
+  "note": "Identifiers and titles only, copied from docs/PRD.md and docs/REGULATORY_RULE_MATRIX.md. Clause references, exceptions, and effective dates are intentionally empty. Status is not ACTIVE.",
+  "rules": [
+    {
+      "ruleCode": "R01",
+      "title": "Manufacturer/Packer/Importer",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R02",
+      "title": "Common/Generic Commodity Name",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R03",
+      "title": "Net Quantity/Number",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R04",
+      "title": "Manufacture/Pre-pack/Import Date",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R05",
+      "title": "Country of Origin where applicable",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R06",
+      "title": "MRP/Retail Sale Price",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R07",
+      "title": "Unit Sale Price where applicable",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R08",
+      "title": "Quantity ↔ Unit-Sale-Price Consistency",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R09",
+      "title": "Best Before/Use By where applicable",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R10",
+      "title": "Consumer Care Details",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R11",
+      "title": "Declaration Readability",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R12",
+      "title": "Declaration Visibility/Placement",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R13",
+      "title": "Font-Size/Legibility where a verified measurable threshold exists",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R14",
+      "title": "Cross-Panel Conflict Detection",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    },
+    {
+      "ruleCode": "R15",
+      "title": "Package Context + Applicability + Exceptions",
+      "status": "unverified",
+      "clauseReference": null,
+      "effectiveFrom": null,
+      "effectiveTo": null,
+      "officialSourceUrl": null
+    }
+  ]
+}

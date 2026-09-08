@@ -1,0 +1,75 @@
+:root {
+  color-scheme: light;
+  --ink: #12202b;
+  --paper: #f4efe4;
+  --panel: #fffdf8;
+  --line: #c9bba4;
+  --accent: #8b1e1e;
+  --muted: #5c6b75;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+a {
+  color: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+}
+
+nav {
+  background: #1a2730;
+  color: #f4efe4;
+  padding: 1.5rem 1rem;
+}
+
+nav h1 {
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+nav a {
+  display: block;
+  padding: 0.45rem 0;
+  text-decoration: none;
+  color: #d8cbb4;
+}
+
+nav a[aria-current='page'] {
+  color: #fff;
+  font-weight: 600;
+}
+
+main {
+  padding: 2rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 1.25rem;
+}
+
+.status-chip {
+  display: inline-block;
+  border: 1px solid var(--ink);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.muted {
+  color: var(--muted);
+}
