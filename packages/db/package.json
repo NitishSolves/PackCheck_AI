@@ -15,9 +15,10 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "generate": "drizzle-kit generate",
-    "migrate": "tsx src/run-migrate.ts"
+    "migrate": "tsx src/run-migrate.ts",
+    "seed": "tsx src/run-seed.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.41.0",

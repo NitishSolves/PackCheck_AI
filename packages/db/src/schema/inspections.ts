@@ -1,34 +1,59 @@
-import { boolean, date, jsonb, pgTable, real, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  date,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  real,
+  text,
+  timestamp,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 import { users } from './users.js';
 
-export const inspections = pgTable('inspections', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  createdByUserId: uuid('created_by_user_id')
-    .notNull()
-    .references(() => users.id),
-  status: varchar('status', { length: 40 }).notNull().default('draft'),
-  referenceDate: date('reference_date').notNull(),
-  locationNote: text('location_note'),
-  overallOutcome: varchar('overall_outcome', { length: 40 }),
-  finalizedAt: timestamp('finalized_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const inspections = pgTable(
+  'inspections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    createdByUserId: uuid('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    status: varchar('status', { length: 40 }).notNull().default('draft'),
+    referenceDate: date('reference_date').notNull(),
+    locationNote: text('location_note'),
+    overallOutcome: varchar('overall_outcome', { length: 40 }),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('inspections_created_by_user_id_idx').on(table.createdByUserId),
+    index('inspections_status_idx').on(table.status),
+    index('inspections_created_at_idx').on(table.createdAt),
+  ],
+);
 
-export const inspectionImages = pgTable('inspection_images', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  inspectionId: uuid('inspection_id')
-    .notNull()
-    .references(() => inspections.id),
-  storageKey: text('storage_key').notNull(),
-  mimeType: varchar('mime_type', { length: 100 }).notNull(),
-  originalFilename: varchar('original_filename', { length: 255 }).notNull(),
-  panelLabel: varchar('panel_label', { length: 100 }),
-  qualityStatus: varchar('quality_status', { length: 40 }).notNull().default('pending'),
-  qualityScore: real('quality_score'),
-  qualityIssues: jsonb('quality_issues').$type<string[]>().notNull().default([]),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const inspectionImages = pgTable(
+  'inspection_images',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    inspectionId: uuid('inspection_id')
+      .notNull()
+      .references(() => inspections.id),
+    storageKey: text('storage_key').notNull(),
+    mimeType: varchar('mime_type', { length: 100 }).notNull(),
+    originalFilename: varchar('original_filename', { length: 255 }).notNull(),
+    panelLabel: varchar('panel_label', { length: 100 }),
+    byteSize: integer('byte_size'),
+    qualityStatus: varchar('quality_status', { length: 40 }).notNull().default('pending'),
+    qualityScore: real('quality_score'),
+    qualityIssues: jsonb('quality_issues').$type<string[]>().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('inspection_images_inspection_id_idx').on(table.inspectionId)],
+);
 
 export const ocrResults = pgTable('ocr_results', {
   id: uuid('id').primaryKey().defaultRandom(),

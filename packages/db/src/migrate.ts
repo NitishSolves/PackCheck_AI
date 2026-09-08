@@ -11,9 +11,7 @@ export async function runMigrations(databaseUrl: string, migrationsFolder: strin
         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `;
-    const files = (await readdir(migrationsFolder))
-      .filter((file) => file.endsWith('.sql'))
-      .sort();
+    const files = (await readdir(migrationsFolder)).filter((file) => file.endsWith('.sql')).sort();
     for (const file of files) {
       const applied = await sql<{ id: string }[]>`
         SELECT id FROM schema_migrations WHERE id = ${file}

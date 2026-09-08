@@ -11,6 +11,29 @@ export const INSPECTION_STATUSES = [
 ] as const;
 export type InspectionStatus = (typeof INSPECTION_STATUSES)[number];
 
+export const INSPECTION_STATUS_TRANSITIONS: Record<InspectionStatus, readonly InspectionStatus[]> =
+  {
+    draft: ['images_uploaded'],
+    images_uploaded: ['quality_failed', 'extracting'],
+    quality_failed: ['draft', 'images_uploaded'],
+    extracting: ['extraction_review', 'quality_failed'],
+    extraction_review: ['context_pending'],
+    context_pending: ['evaluating', 'extraction_review'],
+    evaluating: ['review_pending'],
+    review_pending: ['finalized', 'evaluating'],
+    finalized: [],
+  };
+
+export function canTransitionInspectionStatus(
+  from: InspectionStatus,
+  to: InspectionStatus,
+): boolean {
+  if (from === to) {
+    return true;
+  }
+  return INSPECTION_STATUS_TRANSITIONS[from].includes(to);
+}
+
 export const IMAGE_QUALITY_STATUSES = ['accepted', 'retake_required', 'pending'] as const;
 export type ImageQualityStatus = (typeof IMAGE_QUALITY_STATUSES)[number];
 

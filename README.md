@@ -64,11 +64,18 @@ npm run dev:ai
 npm run dev:web
 ```
 
-Apply migrations when PostgreSQL is available:
+Apply migrations when PostgreSQL is available, then seed development users and P0 rule identifiers (no ACTIVE legal rules):
 
 ```bash
 npm run db:migrate
+npm run db:seed
 ```
+
+Development seed users (override passwords via `SEED_*_PASSWORD`):
+
+- `admin@packcheck.local` / `PackCheckAdmin!dev` (`administrator`)
+- `reviewer@packcheck.local` / `PackCheckReviewer!dev` (`reviewer`)
+- `inspector@packcheck.local` / `PackCheckInspector!dev` (`inspector`)
 
 ## Documents
 

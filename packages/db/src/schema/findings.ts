@@ -1,11 +1,4 @@
-import {
-  jsonb,
-  pgTable,
-  text,
-  timestamp,
-  uuid,
-  varchar,
-} from 'drizzle-orm/pg-core';
+import { jsonb, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 import { inspections, inspectionImages } from './inspections.js';
 import { ruleVersions } from './regulatory.js';
 import { users } from './users.js';
