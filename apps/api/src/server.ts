@@ -19,6 +19,8 @@ import { AuthService } from './services/auth-service.js';
 import { InspectionService } from './services/inspection-service.js';
 import { RegulatoryService } from './services/regulatory-service.js';
 import { ReportService } from './services/report-service.js';
+import { HttpAiClient } from './services/ai-client.js';
+import { ExtractionService } from './services/extraction-service.js';
 import { durationToMs, HmacJwtSigner } from './plugins/jwt-signer.js';
 import { LocalObjectStorage } from './storage/object-storage.js';
 import { LoginRateLimiter } from './security/login-rate-limit.js';
@@ -47,13 +49,25 @@ const auth = new AuthService(
   env.JWT_EXPIRES_IN,
 );
 
+const ai = new HttpAiClient(env.AI_SERVICE_URL);
+const inspectionService = new InspectionService(inspections, images, audit, storage);
+const extractionService = new ExtractionService(
+  inspections,
+  images,
+  extractions,
+  audit,
+  ai,
+  storage,
+);
+
 const app = buildApiApp({
   auth,
-  inspections: new InspectionService(inspections, images, audit, storage),
+  inspections: inspectionService,
   regulatory: new RegulatoryService(rules, sources, proposals, versions, audit),
   reports: new ReportService(reports),
   findings,
   extractions,
+  extractionService,
   audit,
   webOrigin: env.WEB_ORIGIN,
   loginLimiter: new LoginRateLimiter(),

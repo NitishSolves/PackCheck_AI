@@ -50,6 +50,7 @@ export const inspectionImages = pgTable(
     qualityStatus: varchar('quality_status', { length: 40 }).notNull().default('pending'),
     qualityScore: real('quality_score'),
     qualityIssues: jsonb('quality_issues').$type<string[]>().notNull().default([]),
+    qualityMetrics: jsonb('quality_metrics'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('inspection_images_inspection_id_idx').on(table.inspectionId)],
@@ -62,6 +63,7 @@ export const ocrResults = pgTable('ocr_results', {
     .references(() => inspectionImages.id),
   fullText: text('full_text').notNull(),
   tokens: jsonb('tokens').notNull(),
+  blocks: jsonb('blocks').notNull().default([]),
   meanConfidence: real('mean_confidence').notNull(),
   provider: varchar('provider', { length: 100 }).notNull(),
   modelVersion: varchar('model_version', { length: 100 }),
@@ -81,6 +83,8 @@ export const extractedFields = pgTable('extracted_fields', {
   panel: varchar('panel', { length: 100 }),
   boundingBox: jsonb('bounding_box'),
   needsReview: boolean('needs_review').notNull().default(true),
+  parseNotes: jsonb('parse_notes').$type<string[]>().notNull().default([]),
+  sourceOccurrenceId: varchar('source_occurrence_id', { length: 64 }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -92,10 +96,31 @@ export const packageContexts = pgTable('package_contexts', {
     .unique(),
   context: jsonb('context').notNull(),
   unknownApplicability: boolean('unknown_applicability').notNull().default(true),
+  confidence: real('confidence'),
+  provider: varchar('provider', { length: 100 }),
+  modelVersion: varchar('model_version', { length: 100 }),
+  evidenceNotes: jsonb('evidence_notes').$type<string[]>().notNull().default([]),
   confirmedByUserId: uuid('confirmed_by_user_id').references(() => users.id),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const inspectionExtractionRuns = pgTable(
+  'inspection_extraction_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    inspectionId: uuid('inspection_id')
+      .notNull()
+      .references(() => inspections.id),
+    provider: varchar('provider', { length: 100 }).notNull(),
+    modelVersion: varchar('model_version', { length: 100 }),
+    confidence: jsonb('confidence').notNull(),
+    failedSafely: boolean('failed_safely').notNull().default(false),
+    failureReason: text('failure_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('inspection_extraction_runs_inspection_id_idx').on(table.inspectionId)],
+);
 
 export const modelVersions = pgTable('model_versions', {
   id: uuid('id').primaryKey().defaultRandom(),

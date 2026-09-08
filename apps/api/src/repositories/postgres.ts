@@ -1,11 +1,14 @@
-import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   authSessions,
   auditLogs,
   extractedFields,
   findings,
+  inspectionExtractionRuns,
   inspectionImages,
   inspections,
+  ocrResults,
+  packageContexts,
   regulatoryRules,
   regulatorySources,
   reports,
@@ -14,18 +17,32 @@ import {
   users,
   type Database,
 } from '@packcheck/db';
-import type { InspectionStatus, Paginated, PaginationQuery } from '@packcheck/shared';
+import type {
+  ExtractedField,
+  ImageQualityResult,
+  InspectionStatus,
+  LayeredConfidence,
+  OcrResult,
+  PackageClassification,
+  Paginated,
+  PaginationQuery,
+} from '@packcheck/shared';
 import { paginateOffset } from '@packcheck/shared';
 import { notFound } from '../errors.js';
 import type {
   AuditRepository,
+  ExtractedFieldRecord,
   ExtractionRepository,
+  ExtractionRunRecord,
   FindingRepository,
   ImageRepository,
   InspectionDetail,
+  InspectionExtractionSnapshot,
   InspectionImageRecord,
   InspectionRecord,
   InspectionRepository,
+  OcrResultRecord,
+  PackageContextRecord,
   RegulatorySourceRecord,
   RegulatorySourceRepository,
   ReportRepository,
@@ -95,6 +112,7 @@ function mapImage(row: typeof inspectionImages.$inferSelect): InspectionImageRec
     qualityStatus: row.qualityStatus,
     qualityScore: row.qualityScore,
     qualityIssues: row.qualityIssues ?? [],
+    qualityMetrics: (row.qualityMetrics as Record<string, unknown> | null) ?? null,
     createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
   };
 }
@@ -309,6 +327,21 @@ export class PostgresImageRepository implements ImageRepository {
       .from(inspectionImages)
       .where(eq(inspectionImages.inspectionId, inspectionId));
     return rows.map(mapImage);
+  }
+
+  async updateQuality(
+    imageId: string,
+    quality: Pick<ImageQualityResult, 'status' | 'score' | 'issues'> & { metrics?: unknown },
+  ): Promise<void> {
+    await this.db
+      .update(inspectionImages)
+      .set({
+        qualityStatus: quality.status,
+        qualityScore: quality.score,
+        qualityIssues: quality.issues,
+        qualityMetrics: quality.metrics ?? null,
+      })
+      .where(eq(inspectionImages.id, imageId));
   }
 }
 
@@ -571,6 +604,216 @@ export class PostgresExtractionRepository implements ExtractionRepository {
       .from(extractedFields)
       .where(eq(extractedFields.inspectionId, inspectionId));
   }
+
+  async saveInspectionExtraction(input: {
+    inspectionId: string;
+    provider: string;
+    modelVersion: string | null;
+    confidence: LayeredConfidence;
+    failedSafely: boolean;
+    failureReason: string | null;
+    fields: ExtractedField[];
+    ocrByImageId: Array<{ imageId: string; ocr: OcrResult }>;
+    qualityByImageId: Array<{ imageId: string; quality: ImageQualityResult }>;
+    packageClassification: PackageClassification;
+  }): Promise<InspectionExtractionSnapshot> {
+    for (const entry of input.qualityByImageId) {
+      await this.db
+        .update(inspectionImages)
+        .set({
+          qualityStatus: entry.quality.status,
+          qualityScore: entry.quality.score,
+          qualityIssues: entry.quality.issues,
+          qualityMetrics: entry.quality.metrics ?? null,
+        })
+        .where(eq(inspectionImages.id, entry.imageId));
+    }
+
+    const [runRow] = await this.db
+      .insert(inspectionExtractionRuns)
+      .values({
+        inspectionId: input.inspectionId,
+        provider: input.provider,
+        modelVersion: input.modelVersion,
+        confidence: input.confidence,
+        failedSafely: input.failedSafely,
+        failureReason: input.failureReason,
+      })
+      .returning();
+    if (!runRow) {
+      throw new Error('Failed to persist extraction run');
+    }
+
+    const ocrRows =
+      input.ocrByImageId.length === 0
+        ? []
+        : await this.db
+            .insert(ocrResults)
+            .values(
+              input.ocrByImageId.map((entry) => ({
+                imageId: entry.imageId,
+                fullText: entry.ocr.fullText,
+                tokens: entry.ocr.tokens,
+                blocks: entry.ocr.blocks ?? [],
+                meanConfidence: entry.ocr.meanConfidence,
+                provider: entry.ocr.provider,
+                modelVersion: entry.ocr.modelVersion,
+              })),
+            )
+            .returning();
+
+    const fieldRows =
+      input.fields.length === 0
+        ? []
+        : await this.db
+            .insert(extractedFields)
+            .values(
+              input.fields.map((field) => ({
+                inspectionId: input.inspectionId,
+                imageId: field.imageId,
+                fieldKey: field.fieldKey,
+                rawValue: field.rawValue,
+                normalizedValue: field.normalizedValue,
+                confidence: field.confidence,
+                panel: field.panel,
+                boundingBox: field.box,
+                needsReview: field.needsReview,
+                parseNotes: field.parseNotes ?? [],
+                sourceOccurrenceId: field.sourceOccurrenceId,
+              })),
+            )
+            .returning();
+
+    await this.db
+      .insert(packageContexts)
+      .values({
+        inspectionId: input.inspectionId,
+        context: input.packageClassification.suggestedContext,
+        unknownApplicability: input.packageClassification.unknownApplicability,
+        confidence: input.packageClassification.confidence,
+        provider: input.packageClassification.provider,
+        modelVersion: input.packageClassification.modelVersion,
+        evidenceNotes: input.packageClassification.evidenceNotes ?? [],
+      })
+      .onConflictDoUpdate({
+        target: packageContexts.inspectionId,
+        set: {
+          context: input.packageClassification.suggestedContext,
+          unknownApplicability: input.packageClassification.unknownApplicability,
+          confidence: input.packageClassification.confidence,
+          provider: input.packageClassification.provider,
+          modelVersion: input.packageClassification.modelVersion,
+          evidenceNotes: input.packageClassification.evidenceNotes ?? [],
+        },
+      });
+
+    const [contextRow] = await this.db
+      .select()
+      .from(packageContexts)
+      .where(eq(packageContexts.inspectionId, input.inspectionId))
+      .limit(1);
+
+    return {
+      run: mapRun(runRow),
+      fields: fieldRows.map(mapField),
+      ocr: ocrRows.map(mapOcr),
+      packageContext: contextRow ? mapContext(contextRow) : null,
+    };
+  }
+
+  async getSnapshot(inspectionId: string): Promise<InspectionExtractionSnapshot | null> {
+    const [runRow] = await this.db
+      .select()
+      .from(inspectionExtractionRuns)
+      .where(eq(inspectionExtractionRuns.inspectionId, inspectionId))
+      .orderBy(desc(inspectionExtractionRuns.createdAt))
+      .limit(1);
+    if (!runRow) {
+      return null;
+    }
+    const fieldRows = await this.db
+      .select()
+      .from(extractedFields)
+      .where(eq(extractedFields.inspectionId, inspectionId));
+    const imageRows = await this.db
+      .select({ id: inspectionImages.id })
+      .from(inspectionImages)
+      .where(eq(inspectionImages.inspectionId, inspectionId));
+    const imageIds = imageRows.map((row) => row.id);
+    const ocrRows =
+      imageIds.length === 0
+        ? []
+        : await this.db.select().from(ocrResults).where(inArray(ocrResults.imageId, imageIds));
+    const [contextRow] = await this.db
+      .select()
+      .from(packageContexts)
+      .where(eq(packageContexts.inspectionId, inspectionId))
+      .limit(1);
+    return {
+      run: mapRun(runRow),
+      fields: fieldRows.map(mapField),
+      ocr: ocrRows.map(mapOcr),
+      packageContext: contextRow ? mapContext(contextRow) : null,
+    };
+  }
+}
+
+function mapRun(row: typeof inspectionExtractionRuns.$inferSelect): ExtractionRunRecord {
+  return {
+    id: row.id,
+    inspectionId: row.inspectionId,
+    provider: row.provider,
+    modelVersion: row.modelVersion,
+    confidence: row.confidence as LayeredConfidence,
+    failedSafely: row.failedSafely,
+    failureReason: row.failureReason,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapField(row: typeof extractedFields.$inferSelect): ExtractedFieldRecord {
+  return {
+    id: row.id,
+    inspectionId: row.inspectionId,
+    imageId: row.imageId,
+    fieldKey: row.fieldKey,
+    rawValue: row.rawValue,
+    normalizedValue: row.normalizedValue,
+    confidence: row.confidence,
+    panel: row.panel,
+    boundingBox: row.boundingBox,
+    needsReview: row.needsReview,
+    parseNotes: row.parseNotes ?? [],
+    sourceOccurrenceId: row.sourceOccurrenceId,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapOcr(row: typeof ocrResults.$inferSelect): OcrResultRecord {
+  return {
+    id: row.id,
+    imageId: row.imageId,
+    fullText: row.fullText,
+    tokens: row.tokens,
+    blocks: row.blocks,
+    meanConfidence: row.meanConfidence,
+    provider: row.provider,
+    modelVersion: row.modelVersion,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapContext(row: typeof packageContexts.$inferSelect): PackageContextRecord {
+  return {
+    id: row.id,
+    inspectionId: row.inspectionId,
+    context: (row.context ?? {}) as Record<string, unknown>,
+    unknownApplicability: row.unknownApplicability,
+    confidence: row.confidence,
+    provider: row.provider,
+    modelVersion: row.modelVersion,
+    evidenceNotes: row.evidenceNotes ?? [],
+  };
 }
 
 export class PostgresAuditRepository implements AuditRepository {

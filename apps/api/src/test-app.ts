@@ -18,6 +18,8 @@ import { AuthService } from './services/auth-service.js';
 import { InspectionService } from './services/inspection-service.js';
 import { RegulatoryService } from './services/regulatory-service.js';
 import { ReportService } from './services/report-service.js';
+import { ExtractionService } from './services/extraction-service.js';
+import { HttpAiClient } from './services/ai-client.js';
 import { HmacJwtSigner, durationToMs } from './plugins/jwt-signer.js';
 import { LoginRateLimiter } from './security/login-rate-limit.js';
 import type { UserRecord } from './repositories/types.js';
@@ -55,6 +57,13 @@ export async function createTestApp(users: UserRecord[] = []) {
     new HmacJwtSigner('test-jwt-secret-key-32', durationToMs('8h')),
     '8h',
   );
+  const extractionService = new ExtractionService(
+    inspections,
+    images,
+    extractions,
+    audit,
+    new HttpAiClient(process.env.AI_SERVICE_URL ?? 'http://127.0.0.1:9'),
+  );
 
   const app = buildApiApp({
     auth,
@@ -63,10 +72,11 @@ export async function createTestApp(users: UserRecord[] = []) {
     reports: new ReportService(reports),
     findings,
     extractions,
+    extractionService,
     audit,
     webOrigin: 'http://localhost:5173',
     loginLimiter: new LoginRateLimiter(5, 60_000),
   });
 
-  return { app, audit, users: seeded };
+  return { app, audit, users: seeded, inspections, images, extractions, extractionService };
 }

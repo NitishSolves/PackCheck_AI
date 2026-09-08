@@ -1,1 +1,8 @@
-export type { AiExtractionService } from '@packcheck/shared';
+export type {
+  AiExtractionService,
+  ExtractTextInput,
+  ScoreImageQualityInput,
+  DetectDeclarationsInput,
+  ClassifyPackageInput,
+  NormalizeDeclarationFieldsInput,
+} from '@packcheck/shared';

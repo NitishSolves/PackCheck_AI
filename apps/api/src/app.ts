@@ -4,6 +4,7 @@ import type { InspectionService } from './services/inspection-service.js';
 import type { RegulatoryService } from './services/regulatory-service.js';
 import type { AuthService } from './services/auth-service.js';
 import type { ReportService } from './services/report-service.js';
+import type { ExtractionService } from './services/extraction-service.js';
 import type {
   AuditRepository,
   ExtractionRepository,
@@ -23,6 +24,7 @@ export type AppDeps = {
   reports: ReportService;
   findings: FindingRepository;
   extractions: ExtractionRepository;
+  extractionService?: ExtractionService;
   audit: AuditRepository;
   webOrigin: string;
   loginLimiter?: LoginRateLimiter;
@@ -48,6 +50,7 @@ export function buildApiApp(deps: AppDeps) {
     inspections: deps.inspections,
     findings: deps.findings,
     extractions: deps.extractions,
+    extractionService: deps.extractionService,
     reports: deps.reports,
   });
   registerRegulatoryRoutes(app, deps.regulatory);

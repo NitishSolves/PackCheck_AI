@@ -2,19 +2,29 @@ import { randomUUID } from 'node:crypto';
 import {
   P0_RULE_CODES,
   P0_RULE_TITLES,
+  type ExtractedField,
+  type ImageQualityResult,
   type InspectionStatus,
+  type LayeredConfidence,
+  type OcrResult,
+  type PackageClassification,
   type Paginated,
   type PaginationQuery,
 } from '@packcheck/shared';
 import type {
   AuditRepository,
+  ExtractedFieldRecord,
   ExtractionRepository,
+  ExtractionRunRecord,
   FindingRepository,
   ImageRepository,
   InspectionDetail,
+  InspectionExtractionSnapshot,
   InspectionImageRecord,
   InspectionRecord,
   InspectionRepository,
+  OcrResultRecord,
+  PackageContextRecord,
   RegulatorySourceRecord,
   RegulatorySourceRepository,
   ReportRepository,
@@ -186,6 +196,7 @@ export class MemoryImageRepository implements ImageRepository {
       qualityStatus: 'pending',
       qualityScore: null,
       qualityIssues: [],
+      qualityMetrics: null,
       createdAt: isoNow(),
     };
     const list = this.rows.get(input.inspectionId) ?? [];
@@ -196,6 +207,21 @@ export class MemoryImageRepository implements ImageRepository {
 
   async listByInspection(inspectionId: string): Promise<InspectionImageRecord[]> {
     return this.rows.get(inspectionId) ?? [];
+  }
+
+  async updateQuality(
+    imageId: string,
+    quality: Pick<ImageQualityResult, 'status' | 'score' | 'issues'> & { metrics?: unknown },
+  ): Promise<void> {
+    for (const list of this.rows.values()) {
+      const match = list.find((row) => row.id === imageId);
+      if (match) {
+        match.qualityStatus = quality.status;
+        match.qualityScore = quality.score;
+        match.qualityIssues = quality.issues;
+        match.qualityMetrics = (quality.metrics as Record<string, unknown> | null) ?? null;
+      }
+    }
   }
 }
 
@@ -331,8 +357,104 @@ export class MemoryReportRepository implements ReportRepository {
 }
 
 export class MemoryExtractionRepository implements ExtractionRepository {
-  async listByInspection(): Promise<unknown[]> {
-    return [];
+  readonly fields = new Map<string, ExtractedFieldRecord[]>();
+  readonly ocr = new Map<string, OcrResultRecord[]>();
+  readonly runs = new Map<string, ExtractionRunRecord>();
+  readonly contexts = new Map<string, PackageContextRecord>();
+
+  async listByInspection(inspectionId: string): Promise<unknown[]> {
+    return this.fields.get(inspectionId) ?? [];
+  }
+
+  async saveInspectionExtraction(input: {
+    inspectionId: string;
+    provider: string;
+    modelVersion: string | null;
+    confidence: LayeredConfidence;
+    failedSafely: boolean;
+    failureReason: string | null;
+    fields: ExtractedField[];
+    ocrByImageId: Array<{ imageId: string; ocr: OcrResult }>;
+    qualityByImageId: Array<{ imageId: string; quality: ImageQualityResult }>;
+    packageClassification: PackageClassification;
+  }): Promise<InspectionExtractionSnapshot> {
+    void input.qualityByImageId;
+    const now = isoNow();
+    const run: ExtractionRunRecord = {
+      id: randomUUID(),
+      inspectionId: input.inspectionId,
+      provider: input.provider,
+      modelVersion: input.modelVersion,
+      confidence: input.confidence,
+      failedSafely: input.failedSafely,
+      failureReason: input.failureReason,
+      createdAt: now,
+    };
+    this.runs.set(input.inspectionId, run);
+
+    const existingFields = this.fields.get(input.inspectionId) ?? [];
+    const savedFields: ExtractedFieldRecord[] = input.fields.map((field) => ({
+      id: randomUUID(),
+      inspectionId: input.inspectionId,
+      imageId: field.imageId,
+      fieldKey: field.fieldKey,
+      rawValue: field.rawValue,
+      normalizedValue: field.normalizedValue,
+      confidence: field.confidence,
+      panel: field.panel,
+      boundingBox: field.box,
+      needsReview: field.needsReview,
+      parseNotes: field.parseNotes ?? [],
+      sourceOccurrenceId: field.sourceOccurrenceId ?? null,
+      createdAt: now,
+    }));
+    this.fields.set(input.inspectionId, [...existingFields, ...savedFields]);
+
+    const ocrRows: OcrResultRecord[] = input.ocrByImageId.map((entry) => ({
+      id: randomUUID(),
+      imageId: entry.imageId,
+      fullText: entry.ocr.fullText,
+      tokens: entry.ocr.tokens,
+      blocks: entry.ocr.blocks ?? [],
+      meanConfidence: entry.ocr.meanConfidence,
+      provider: entry.ocr.provider,
+      modelVersion: entry.ocr.modelVersion,
+      createdAt: now,
+    }));
+    const existingOcr = this.ocr.get(input.inspectionId) ?? [];
+    this.ocr.set(input.inspectionId, [...existingOcr, ...ocrRows]);
+
+    const packageContext: PackageContextRecord = {
+      id: randomUUID(),
+      inspectionId: input.inspectionId,
+      context: input.packageClassification.suggestedContext,
+      unknownApplicability: input.packageClassification.unknownApplicability,
+      confidence: input.packageClassification.confidence,
+      provider: input.packageClassification.provider,
+      modelVersion: input.packageClassification.modelVersion,
+      evidenceNotes: input.packageClassification.evidenceNotes ?? [],
+    };
+    this.contexts.set(input.inspectionId, packageContext);
+
+    return {
+      run,
+      fields: this.fields.get(input.inspectionId) ?? [],
+      ocr: this.ocr.get(input.inspectionId) ?? [],
+      packageContext,
+    };
+  }
+
+  async getSnapshot(inspectionId: string): Promise<InspectionExtractionSnapshot | null> {
+    const run = this.runs.get(inspectionId);
+    if (!run) {
+      return null;
+    }
+    return {
+      run,
+      fields: this.fields.get(inspectionId) ?? [],
+      ocr: this.ocr.get(inspectionId) ?? [],
+      packageContext: this.contexts.get(inspectionId) ?? null,
+    };
   }
 }
 

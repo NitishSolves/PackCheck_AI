@@ -1,5 +1,10 @@
 import type {
+  ExtractedField,
+  ImageQualityResult,
   InspectionStatus,
+  LayeredConfidence,
+  OcrResult,
+  PackageClassification,
   Paginated,
   PaginationQuery,
   PublicUser,
@@ -42,7 +47,65 @@ export type InspectionImageRecord = {
   qualityStatus: string;
   qualityScore: number | null;
   qualityIssues: string[];
+  qualityMetrics: Record<string, unknown> | null;
   createdAt: string;
+};
+
+export type OcrResultRecord = {
+  id: string;
+  imageId: string;
+  fullText: string;
+  tokens: unknown;
+  blocks: unknown;
+  meanConfidence: number;
+  provider: string;
+  modelVersion: string | null;
+  createdAt: string;
+};
+
+export type ExtractedFieldRecord = {
+  id: string;
+  inspectionId: string;
+  imageId: string | null;
+  fieldKey: string;
+  rawValue: string | null;
+  normalizedValue: string | null;
+  confidence: number;
+  panel: string | null;
+  boundingBox: unknown;
+  needsReview: boolean;
+  parseNotes: string[];
+  sourceOccurrenceId: string | null;
+  createdAt: string;
+};
+
+export type PackageContextRecord = {
+  id: string;
+  inspectionId: string;
+  context: Record<string, unknown>;
+  unknownApplicability: boolean;
+  confidence: number | null;
+  provider: string | null;
+  modelVersion: string | null;
+  evidenceNotes: string[];
+};
+
+export type ExtractionRunRecord = {
+  id: string;
+  inspectionId: string;
+  provider: string;
+  modelVersion: string | null;
+  confidence: LayeredConfidence;
+  failedSafely: boolean;
+  failureReason: string | null;
+  createdAt: string;
+};
+
+export type InspectionExtractionSnapshot = {
+  run: ExtractionRunRecord;
+  fields: ExtractedFieldRecord[];
+  ocr: OcrResultRecord[];
+  packageContext: PackageContextRecord | null;
 };
 
 export type InspectionDetail = InspectionRecord & {
@@ -133,6 +196,10 @@ export interface ImageRepository {
     byteSize?: number;
   }): Promise<InspectionImageRecord>;
   listByInspection(inspectionId: string): Promise<InspectionImageRecord[]>;
+  updateQuality?(
+    imageId: string,
+    quality: Pick<ImageQualityResult, 'status' | 'score' | 'issues'> & { metrics?: unknown },
+  ): Promise<void>;
 }
 
 export interface FindingRepository {
@@ -193,6 +260,19 @@ export interface ReportRepository {
 
 export interface ExtractionRepository {
   listByInspection(inspectionId: string): Promise<unknown[]>;
+  saveInspectionExtraction?(input: {
+    inspectionId: string;
+    provider: string;
+    modelVersion: string | null;
+    confidence: LayeredConfidence;
+    failedSafely: boolean;
+    failureReason: string | null;
+    fields: ExtractedField[];
+    ocrByImageId: Array<{ imageId: string; ocr: OcrResult }>;
+    qualityByImageId: Array<{ imageId: string; quality: ImageQualityResult }>;
+    packageClassification: PackageClassification;
+  }): Promise<InspectionExtractionSnapshot>;
+  getSnapshot?(inspectionId: string): Promise<InspectionExtractionSnapshot | null>;
 }
 
 export interface AuditRepository {

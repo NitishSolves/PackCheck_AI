@@ -7,8 +7,10 @@ import {
 } from '@packcheck/shared';
 import { z } from 'zod';
 import type { InspectionService } from '../services/inspection-service.js';
+import type { ExtractionService } from '../services/extraction-service.js';
 import type { ExtractionRepository, FindingRepository } from '../repositories/types.js';
 import type { ReportService } from '../services/report-service.js';
+import { serviceUnavailable } from '../errors.js';
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -18,6 +20,7 @@ export function registerInspectionRoutes(
     inspections: InspectionService;
     findings: FindingRepository;
     extractions: ExtractionRepository;
+    extractionService?: ExtractionService;
     reports: ReportService;
   },
 ): void {
@@ -58,8 +61,19 @@ export function registerInspectionRoutes(
 
   app.get('/api/inspections/:id/extractions', async (request) => {
     const params = idParams.parse(request.params);
+    if (deps.extractionService) {
+      return deps.extractionService.getByInspection(params.id);
+    }
     await deps.inspections.getById(params.id);
     return deps.extractions.listByInspection(params.id);
+  });
+
+  app.post('/api/inspections/:id/extract', async (request) => {
+    const params = idParams.parse(request.params);
+    if (!deps.extractionService) {
+      throw serviceUnavailable('Extraction service is not configured');
+    }
+    return deps.extractionService.runForInspection(request.authUser, params.id);
   });
 
   app.get('/api/inspections/:id/findings', async (request) => {
@@ -84,6 +98,9 @@ export function registerInspectionRoutes(
 
   app.get('/api/extractions/:inspectionId', async (request) => {
     const params = z.object({ inspectionId: z.string().uuid() }).parse(request.params);
+    if (deps.extractionService) {
+      return deps.extractionService.getByInspection(params.inspectionId);
+    }
     await deps.inspections.getById(params.inspectionId);
     return deps.extractions.listByInspection(params.inspectionId);
   });

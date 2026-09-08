@@ -15,6 +15,13 @@
       "when": 1757336400000,
       "tag": "0001_auth_sessions_and_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1757340000000,
+      "tag": "0002_ai_extraction_evidence",
+      "breakpoints": true
     }
   ]
 }

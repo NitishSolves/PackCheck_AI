@@ -26,6 +26,7 @@ export interface ObjectStorage {
     mimeType: string;
     bytes: Buffer;
   }): Promise<StoredObject>;
+  resolvePath?(storageKey: string): string;
 }
 
 export function sanitizeFilename(originalFilename: string): string {
@@ -68,5 +69,17 @@ export class LocalObjectStorage implements ObjectStorage {
       mimeType: input.mimeType,
       originalFilename,
     };
+  }
+
+  resolvePath(storageKey: string): string {
+    if (storageKey.includes('..') || path.isAbsolute(storageKey)) {
+      throw badRequest('Invalid storage key');
+    }
+    const absolute = path.resolve(this.rootDir, storageKey);
+    const root = path.resolve(this.rootDir);
+    if (!absolute.startsWith(root + path.sep) && absolute !== root) {
+      throw badRequest('Invalid storage path');
+    }
+    return absolute;
   }
 }

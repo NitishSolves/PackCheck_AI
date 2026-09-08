@@ -35,3 +35,15 @@ export function conflict(message: string): AppError {
 export function tooManyRequests(message = 'Too many login attempts'): AppError {
   return new AppError(429, 'RATE_LIMITED', message);
 }
+
+export function serviceUnavailable(message: string, details?: unknown): AppError {
+  return new AppError(503, 'SERVICE_UNAVAILABLE', message, details);
+}
+
+export function gatewayTimeout(message: string, details?: unknown): AppError {
+  return new AppError(504, 'GATEWAY_TIMEOUT', message, details);
+}
+
+export function unprocessable(message: string, details?: unknown): AppError {
+  return new AppError(422, 'UNPROCESSABLE', message, details);
+}
