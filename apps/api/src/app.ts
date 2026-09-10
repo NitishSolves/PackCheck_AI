@@ -5,11 +5,9 @@ import type { RegulatoryService } from './services/regulatory-service.js';
 import type { AuthService } from './services/auth-service.js';
 import type { ReportService } from './services/report-service.js';
 import type { ExtractionService } from './services/extraction-service.js';
-import type {
-  AuditRepository,
-  ExtractionRepository,
-  FindingRepository,
-} from './repositories/types.js';
+import type { FindingService } from './services/finding-service.js';
+import type { AuditService } from './services/audit-service.js';
+import type { AuditRepository, ExtractionRepository } from './repositories/types.js';
 import { LoginRateLimiter } from './security/login-rate-limit.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
 import { registerAuthHooks } from './plugins/auth.js';
@@ -22,10 +20,11 @@ export type AppDeps = {
   inspections: InspectionService;
   regulatory: RegulatoryService;
   reports: ReportService;
-  findings: FindingRepository;
+  findings: FindingService;
   extractions: ExtractionRepository;
   extractionService?: ExtractionService;
   audit: AuditRepository;
+  auditService: AuditService;
   webOrigin: string;
   loginLimiter?: LoginRateLimiter;
 };
@@ -52,6 +51,7 @@ export function buildApiApp(deps: AppDeps) {
     extractions: deps.extractions,
     extractionService: deps.extractionService,
     reports: deps.reports,
+    audit: deps.auditService,
   });
   registerRegulatoryRoutes(app, deps.regulatory);
 

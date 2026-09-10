@@ -12,6 +12,16 @@ describe('regulatory history invariants', () => {
     expect(sql).not.toMatch(/DROP TABLE ocr_results/i);
   });
 
+  it('ships an evidence review migration that keeps audit logs append-only', () => {
+    const folder = join(dirname(fileURLToPath(import.meta.url)), '../drizzle');
+    const sql = readFileSync(join(folder, '0003_evidence_review_audit_protection.sql'), 'utf8');
+    expect(sql).toMatch(/crop_storage_key/);
+    expect(sql).toMatch(/Audit logs are append-only/);
+    expect(sql).toMatch(/BEFORE UPDATE ON audit_logs/);
+    expect(sql).toMatch(/BEFORE DELETE ON audit_logs/);
+    expect(sql).not.toMatch(/DROP TABLE findings/i);
+  });
+
   it('ships a migration that forbids deleting or overwriting rule versions', () => {
     const folder = join(dirname(fileURLToPath(import.meta.url)), '../drizzle');
     const sql = readFileSync(join(folder, '0001_auth_sessions_and_invariants.sql'), 'utf8');

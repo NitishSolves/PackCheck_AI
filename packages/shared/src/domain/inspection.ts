@@ -39,3 +39,25 @@ export type ImageQualityStatus = (typeof IMAGE_QUALITY_STATUSES)[number];
 
 export const REVIEW_DECISIONS = ['confirm', 'reject', 'not_applicable', 'edit'] as const;
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+export const REVIEWER_STATES = [
+  'pending',
+  'confirmed',
+  'rejected',
+  'not_applicable',
+  'edited',
+] as const;
+export type ReviewerState = (typeof REVIEWER_STATES)[number];
+
+export function reviewerStateForDecision(decision: ReviewDecision): ReviewerState {
+  switch (decision) {
+    case 'confirm':
+      return 'confirmed';
+    case 'reject':
+      return 'rejected';
+    case 'not_applicable':
+      return 'not_applicable';
+    case 'edit':
+      return 'edited';
+  }
+}

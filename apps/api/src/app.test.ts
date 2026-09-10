@@ -10,8 +10,15 @@ const admin = await createTestUser({
   role: 'administrator',
   passwordHash: await hashPassword(TEST_PASSWORD),
 });
+const reviewer = await createTestUser({
+  id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  email: 'reviewer@packcheck.local',
+  displayName: 'Reviewer',
+  role: 'reviewer',
+  passwordHash: await hashPassword(TEST_PASSWORD),
+});
 
-const { app } = await createTestApp([inspector, admin]);
+const { app, findings, inspections } = await createTestApp([inspector, admin, reviewer]);
 
 beforeAll(async () => {
   await app.ready();
@@ -191,5 +198,353 @@ describe('API foundation', () => {
       },
     });
     expect(forbidden.statusCode).toBe(403);
+  });
+
+  it('links findings to evidence and rule version without a legal verdict', async () => {
+    const session = await login('inspector@packcheck.local');
+    const headers = { authorization: `Bearer ${session.token}` };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/inspections',
+      headers,
+      payload: { referenceDate: '2026-01-15' },
+    });
+    const inspection = created.json() as { id: string };
+    const image = await app.inject({
+      method: 'POST',
+      url: `/api/inspections/${inspection.id}/images`,
+      headers,
+      payload: {
+        mimeType: 'image/jpeg',
+        originalFilename: 'front.jpg',
+        storageKey: 'inspections/demo/front.jpg',
+      },
+    });
+    const imageId = (image.json() as { id: string }).id;
+    await inspections.update(inspection.id, { status: 'review_pending' });
+    findings.findings.push({
+      id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+      inspectionId: inspection.id,
+      ruleVersionId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+      outcome: 'POTENTIAL_NON_COMPLIANCE',
+      engineDecision: 'ISSUE',
+      detectedValue: 'missing net quantity',
+      expectedRequirement: 'Synthetic test requirement only.',
+      explanation: 'Potential non-compliance detected. Needs verification.',
+      reviewerState: 'pending',
+      createdAt: new Date().toISOString(),
+      evidence: [
+        {
+          id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+          findingId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+          imageId,
+          boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 },
+          extractedFieldKey: 'net_quantity',
+          ocrSnippet: 'NET 0 g',
+          cropStorageKey: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      reviews: [],
+      rule: {
+        id: '11111111-1111-4111-8111-111111111111',
+        ruleCode: 'SYNTHETIC_TEST_ONLY',
+        title: 'Synthetic test rule',
+        ruleNumber: null,
+        clauseReference: null,
+      },
+      ruleVersion: {
+        id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+        ruleId: '11111111-1111-4111-8111-111111111111',
+        versionNumber: 1,
+        sourceId: '22222222-2222-4222-8222-222222222222',
+        clauseReference: null,
+        requirementText: 'Synthetic test requirement only.',
+        status: 'draft',
+        effectiveFrom: '2011-01-01',
+        effectiveTo: null,
+      },
+      source: {
+        id: '22222222-2222-4222-8222-222222222222',
+        title: 'Synthetic test source',
+        sourceType: 'test',
+        issuingAuthority: 'Test only',
+        officialUrl: 'https://example.invalid/test',
+        documentHash: null,
+        publicationDate: null,
+        effectiveDate: null,
+        verificationStatus: 'unverified',
+        retrievedAt: null,
+      },
+    });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: `/api/inspections/${inspection.id}/findings`,
+      headers,
+    });
+    expect(listed.statusCode).toBe(200);
+    const body = listed.json() as Array<{
+      wording: string;
+      evidence: unknown[];
+      rule: { ruleCode: string };
+      source: { verificationStatus: string };
+    }>;
+    expect(body[0]).toMatchObject({
+      wording: 'Potential non-compliance detected.',
+      rule: { ruleCode: 'SYNTHETIC_TEST_ONLY' },
+      source: { verificationStatus: 'unverified' },
+    });
+    expect(body[0]?.evidence).toHaveLength(1);
+    expect(JSON.stringify(body[0])).not.toMatch(/LEGAL_VIOLATION=true/);
+  });
+
+  it('lets reviewers confirm findings and forbids inspectors from reviewing', async () => {
+    const inspectorSession = await login('inspector@packcheck.local');
+    const inspectorHeaders = { authorization: `Bearer ${inspectorSession.token}` };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/inspections',
+      headers: inspectorHeaders,
+      payload: { referenceDate: '2026-01-16' },
+    });
+    const inspection = created.json() as { id: string };
+    await inspections.update(inspection.id, { status: 'review_pending' });
+    findings.findings.push({
+      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      inspectionId: inspection.id,
+      ruleVersionId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+      outcome: 'POTENTIAL_NON_COMPLIANCE',
+      engineDecision: 'ISSUE',
+      detectedValue: 'missing net quantity',
+      expectedRequirement: 'Synthetic test requirement only.',
+      explanation: 'Potential non-compliance detected. Needs verification.',
+      reviewerState: 'pending',
+      createdAt: new Date().toISOString(),
+      evidence: [
+        {
+          id: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+          findingId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          imageId: '99999999-9999-9999-9999-999999999999',
+          boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 },
+          extractedFieldKey: 'net_quantity',
+          ocrSnippet: 'NET 0 g',
+          cropStorageKey: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      reviews: [],
+      rule: {
+        id: '11111111-1111-4111-8111-111111111111',
+        ruleCode: 'SYNTHETIC_TEST_ONLY',
+        title: 'Synthetic test rule',
+        ruleNumber: null,
+        clauseReference: null,
+      },
+      ruleVersion: {
+        id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+        ruleId: '11111111-1111-4111-8111-111111111111',
+        versionNumber: 1,
+        sourceId: '22222222-2222-4222-8222-222222222222',
+        clauseReference: null,
+        requirementText: 'Synthetic test requirement only.',
+        status: 'draft',
+        effectiveFrom: '2011-01-01',
+        effectiveTo: null,
+      },
+      source: {
+        id: '22222222-2222-4222-8222-222222222222',
+        title: 'Synthetic test source',
+        sourceType: 'test',
+        issuingAuthority: 'Test only',
+        officialUrl: 'https://example.invalid/test',
+        documentHash: null,
+        publicationDate: null,
+        effectiveDate: null,
+        verificationStatus: 'unverified',
+        retrievedAt: null,
+      },
+    });
+
+    const inspectorReview = await app.inject({
+      method: 'POST',
+      url: '/api/findings/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/review',
+      headers: inspectorHeaders,
+      payload: { decision: 'confirm' },
+    });
+    expect(inspectorReview.statusCode).toBe(403);
+
+    const reviewerSession = await login('reviewer@packcheck.local');
+    const confirmed = await app.inject({
+      method: 'POST',
+      url: '/api/findings/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/review',
+      headers: { authorization: `Bearer ${reviewerSession.token}` },
+      payload: { decision: 'confirm', note: 'Evidence matches the extracted snippet.' },
+    });
+    expect(confirmed.statusCode).toBe(201);
+    expect(confirmed.json()).toMatchObject({
+      finding: { reviewerState: 'confirmed', wording: 'Potential non-compliance detected.' },
+      review: { decision: 'confirm' },
+    });
+  });
+
+  it('finalizes after review, generates a PDF disclaimer, and filters history', async () => {
+    const inspectorSession = await login('inspector@packcheck.local');
+    const reviewerSession = await login('reviewer@packcheck.local');
+    const inspectorHeaders = { authorization: `Bearer ${inspectorSession.token}` };
+    const reviewerHeaders = { authorization: `Bearer ${reviewerSession.token}` };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/inspections',
+      headers: inspectorHeaders,
+      payload: { referenceDate: '2026-01-17', locationNote: 'History filter stall' },
+    });
+    const inspection = created.json() as { id: string };
+    await inspections.update(inspection.id, { status: 'review_pending' });
+    findings.findings.push({
+      id: '12121212-1212-4212-8212-121212121212',
+      inspectionId: inspection.id,
+      ruleVersionId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+      outcome: 'POTENTIAL_NON_COMPLIANCE',
+      engineDecision: 'ISSUE',
+      detectedValue: 'missing net quantity',
+      expectedRequirement: 'Synthetic test requirement only.',
+      explanation: 'Potential non-compliance detected. Needs verification.',
+      reviewerState: 'pending',
+      createdAt: new Date().toISOString(),
+      evidence: [
+        {
+          id: '13131313-1313-4313-8313-131313131313',
+          findingId: '12121212-1212-4212-8212-121212121212',
+          imageId: '99999999-9999-9999-9999-999999999999',
+          boundingBox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 },
+          extractedFieldKey: 'net_quantity',
+          ocrSnippet: 'NET 0 g',
+          cropStorageKey: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      reviews: [],
+      rule: {
+        id: '11111111-1111-4111-8111-111111111111',
+        ruleCode: 'SYNTHETIC_TEST_ONLY',
+        title: 'Synthetic test rule',
+        ruleNumber: null,
+        clauseReference: null,
+      },
+      ruleVersion: {
+        id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+        ruleId: '11111111-1111-4111-8111-111111111111',
+        versionNumber: 1,
+        sourceId: '22222222-2222-4222-8222-222222222222',
+        clauseReference: null,
+        requirementText: 'Synthetic test requirement only.',
+        status: 'draft',
+        effectiveFrom: '2011-01-01',
+        effectiveTo: null,
+      },
+      source: {
+        id: '22222222-2222-4222-8222-222222222222',
+        title: 'Synthetic test source',
+        sourceType: 'test',
+        issuingAuthority: 'Test only',
+        officialUrl: 'https://example.invalid/test',
+        documentHash: null,
+        publicationDate: null,
+        effectiveDate: null,
+        verificationStatus: 'unverified',
+        retrievedAt: null,
+      },
+    });
+
+    const tooEarly = await app.inject({
+      method: 'POST',
+      url: `/api/inspections/${inspection.id}/finalize`,
+      headers: reviewerHeaders,
+    });
+    expect(tooEarly.statusCode).toBe(409);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/findings/12121212-1212-4212-8212-121212121212/review',
+      headers: reviewerHeaders,
+      payload: { decision: 'confirm' },
+    });
+
+    const inspectorFinalize = await app.inject({
+      method: 'POST',
+      url: `/api/inspections/${inspection.id}/finalize`,
+      headers: inspectorHeaders,
+    });
+    expect(inspectorFinalize.statusCode).toBe(403);
+
+    const finalized = await app.inject({
+      method: 'POST',
+      url: `/api/inspections/${inspection.id}/finalize`,
+      headers: reviewerHeaders,
+    });
+    expect(finalized.statusCode).toBe(200);
+    expect(finalized.json()).toMatchObject({
+      status: 'finalized',
+      overallOutcome: 'POTENTIAL_NON_COMPLIANCE',
+    });
+
+    const silentPatch = await app.inject({
+      method: 'PATCH',
+      url: `/api/inspections/${inspection.id}`,
+      headers: reviewerHeaders,
+      payload: { locationNote: 'should not change' },
+    });
+    expect(silentPatch.statusCode).toBe(409);
+
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/api/inspections/${inspection.id}/reports`,
+      headers: reviewerHeaders,
+    });
+    expect(generated.statusCode).toBe(201);
+    const report = generated.json() as { id: string };
+    const download = await app.inject({
+      method: 'GET',
+      url: `/api/reports/${report.id}/download`,
+      headers: reviewerHeaders,
+    });
+    expect(download.statusCode).toBe(200);
+    expect(String(download.headers['content-type'])).toContain('application/pdf');
+    const pdfText = Buffer.from(download.rawPayload).toString('latin1');
+    expect(pdfText.startsWith('%PDF-')).toBe(true);
+    expect(pdfText).toContain('Potential non-compliance detected.');
+    expect(pdfText).toContain('not a legally binding determination');
+
+    const history = await app.inject({
+      method: 'GET',
+      url: '/api/inspections?status=finalized&overallOutcome=POTENTIAL_NON_COMPLIANCE',
+      headers: reviewerHeaders,
+    });
+    expect(history.statusCode).toBe(200);
+    expect((history.json() as { total: number }).total).toBeGreaterThanOrEqual(1);
+
+    const audit = await app.inject({
+      method: 'GET',
+      url: `/api/audit-logs?inspectionId=${inspection.id}&pageSize=50`,
+      headers: reviewerHeaders,
+    });
+    expect(audit.statusCode).toBe(200);
+    const auditBody = audit.json() as { items: Array<{ action: string }> };
+    expect(auditBody.items.map((item) => item.action)).toEqual(
+      expect.arrayContaining([
+        'inspection.create',
+        'finding.review',
+        'inspection.finalize',
+        'report.generate',
+      ]),
+    );
+
+    const inspectorAudit = await app.inject({
+      method: 'GET',
+      url: '/api/audit-logs',
+      headers: inspectorHeaders,
+    });
+    expect(inspectorAudit.statusCode).toBe(403);
   });
 });

@@ -1,5 +1,7 @@
 import type {
+  BoundingBox,
   ExtractedField,
+  FindingOutcome,
   ImageQualityResult,
   InspectionStatus,
   LayeredConfidence,
@@ -8,6 +10,8 @@ import type {
   Paginated,
   PaginationQuery,
   PublicUser,
+  ReviewDecision,
+  ReviewerState,
   UserRole,
 } from '@packcheck/shared';
 
@@ -154,6 +158,90 @@ export type RuleProposalRecord = {
   status: string;
 };
 
+export type FindingRecord = {
+  id: string;
+  inspectionId: string;
+  ruleVersionId: string;
+  outcome: FindingOutcome;
+  engineDecision: string;
+  detectedValue: string | null;
+  expectedRequirement: string;
+  explanation: string;
+  reviewerState: ReviewerState;
+  createdAt: string;
+};
+
+export type FindingEvidenceRecord = {
+  id: string;
+  findingId: string;
+  imageId: string;
+  boundingBox: BoundingBox | null;
+  extractedFieldKey: string | null;
+  ocrSnippet: string | null;
+  cropStorageKey: string | null;
+  createdAt: string;
+};
+
+export type ReviewActionRecord = {
+  id: string;
+  findingId: string;
+  reviewerUserId: string;
+  decision: ReviewDecision;
+  note: string | null;
+  editedOutcome: FindingOutcome | null;
+  createdAt: string;
+};
+
+export type FindingRuleRecord = {
+  id: string;
+  ruleCode: string;
+  title: string;
+  ruleNumber: string | null;
+  clauseReference: string | null;
+};
+
+export type FindingDetail = FindingRecord & {
+  evidence: FindingEvidenceRecord[];
+  reviews: ReviewActionRecord[];
+  rule: FindingRuleRecord;
+  ruleVersion: RuleVersionRecord;
+  source: RegulatorySourceRecord;
+};
+
+export type ReportRecord = {
+  id: string;
+  inspectionId: string;
+  storageKey: string;
+  generatedByUserId: string | null;
+  createdAt: string;
+};
+
+export type AuditLogRecord = {
+  id: string;
+  actorUserId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type InspectionListFilter = PaginationQuery & {
+  status?: InspectionStatus;
+  createdByUserId?: string;
+  overallOutcome?: FindingOutcome;
+  referenceDateFrom?: string;
+  referenceDateTo?: string;
+};
+
+export type AuditListFilter = PaginationQuery & {
+  actorUserId?: string;
+  action?: string;
+  entityType?: string;
+  entityId?: string;
+  inspectionId?: string;
+};
+
 export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
@@ -179,10 +267,15 @@ export interface InspectionRepository {
   }): Promise<InspectionRecord>;
   getById(id: string): Promise<InspectionRecord | null>;
   getDetail(id: string): Promise<InspectionDetail | null>;
-  list(query: PaginationQuery): Promise<Paginated<InspectionRecord>>;
+  list(query: InspectionListFilter): Promise<Paginated<InspectionRecord>>;
   update(
     id: string,
-    patch: Partial<Pick<InspectionRecord, 'referenceDate' | 'locationNote' | 'status'>>,
+    patch: Partial<
+      Pick<
+        InspectionRecord,
+        'referenceDate' | 'locationNote' | 'status' | 'overallOutcome' | 'finalizedAt'
+      >
+    >,
   ): Promise<InspectionRecord>;
 }
 
@@ -196,6 +289,7 @@ export interface ImageRepository {
     byteSize?: number;
   }): Promise<InspectionImageRecord>;
   listByInspection(inspectionId: string): Promise<InspectionImageRecord[]>;
+  getById(id: string): Promise<InspectionImageRecord | null>;
   updateQuality?(
     imageId: string,
     quality: Pick<ImageQualityResult, 'status' | 'score' | 'issues'> & { metrics?: unknown },
@@ -203,7 +297,17 @@ export interface ImageRepository {
 }
 
 export interface FindingRepository {
-  listByInspection(inspectionId: string): Promise<unknown[]>;
+  listByInspection(inspectionId: string): Promise<FindingDetail[]>;
+  getDetail(id: string): Promise<FindingDetail | null>;
+  applyReview(input: {
+    findingId: string;
+    reviewerUserId: string;
+    decision: ReviewDecision;
+    note?: string;
+    editedOutcome?: FindingOutcome;
+    reviewerState: ReviewerState;
+    outcome: FindingOutcome;
+  }): Promise<{ finding: FindingRecord; review: ReviewActionRecord }>;
 }
 
 export interface RuleRepository {
@@ -255,7 +359,13 @@ export interface RuleProposalRepository {
 }
 
 export interface ReportRepository {
-  listByInspection(inspectionId: string): Promise<unknown[]>;
+  listByInspection(inspectionId: string): Promise<ReportRecord[]>;
+  create(input: {
+    inspectionId: string;
+    storageKey: string;
+    generatedByUserId: string;
+  }): Promise<ReportRecord>;
+  getById(id: string): Promise<ReportRecord | null>;
 }
 
 export interface ExtractionRepository {
@@ -283,6 +393,7 @@ export interface AuditRepository {
     entityId?: string;
     payload?: Record<string, unknown>;
   }): Promise<void>;
+  list(filter: AuditListFilter): Promise<Paginated<AuditLogRecord>>;
 }
 
 export type { UserRole };

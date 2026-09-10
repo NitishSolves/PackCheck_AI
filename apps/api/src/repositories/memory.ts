@@ -3,31 +3,40 @@ import {
   P0_RULE_CODES,
   P0_RULE_TITLES,
   type ExtractedField,
+  type FindingOutcome,
   type ImageQualityResult,
   type InspectionStatus,
   type LayeredConfidence,
   type OcrResult,
   type PackageClassification,
   type Paginated,
-  type PaginationQuery,
+  type ReviewDecision,
+  type ReviewerState,
 } from '@packcheck/shared';
 import type {
+  AuditListFilter,
+  AuditLogRecord,
   AuditRepository,
   ExtractedFieldRecord,
   ExtractionRepository,
   ExtractionRunRecord,
+  FindingDetail,
+  FindingRecord,
   FindingRepository,
   ImageRepository,
   InspectionDetail,
   InspectionExtractionSnapshot,
   InspectionImageRecord,
+  InspectionListFilter,
   InspectionRecord,
   InspectionRepository,
   OcrResultRecord,
   PackageContextRecord,
   RegulatorySourceRecord,
   RegulatorySourceRepository,
+  ReportRecord,
   ReportRepository,
+  ReviewActionRecord,
   RuleCatalogRecord,
   RuleProposalRecord,
   RuleProposalRepository,
@@ -143,8 +152,23 @@ export class MemoryInspectionRepository implements InspectionRepository {
     return { ...inspection, images: this.images.get(id) ?? [] };
   }
 
-  async list(query: PaginationQuery): Promise<Paginated<InspectionRecord>> {
-    const all = [...this.rows.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  async list(query: InspectionListFilter): Promise<Paginated<InspectionRecord>> {
+    let all = [...this.rows.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (query.status) {
+      all = all.filter((row) => row.status === query.status);
+    }
+    if (query.createdByUserId) {
+      all = all.filter((row) => row.createdByUserId === query.createdByUserId);
+    }
+    if (query.overallOutcome) {
+      all = all.filter((row) => row.overallOutcome === query.overallOutcome);
+    }
+    if (query.referenceDateFrom) {
+      all = all.filter((row) => row.referenceDate >= query.referenceDateFrom!);
+    }
+    if (query.referenceDateTo) {
+      all = all.filter((row) => row.referenceDate <= query.referenceDateTo!);
+    }
     const start = (query.page - 1) * query.pageSize;
     return {
       items: all.slice(start, start + query.pageSize),
@@ -156,7 +180,12 @@ export class MemoryInspectionRepository implements InspectionRepository {
 
   async update(
     id: string,
-    patch: Partial<Pick<InspectionRecord, 'referenceDate' | 'locationNote' | 'status'>>,
+    patch: Partial<
+      Pick<
+        InspectionRecord,
+        'referenceDate' | 'locationNote' | 'status' | 'overallOutcome' | 'finalizedAt'
+      >
+    >,
   ): Promise<InspectionRecord> {
     const existing = this.rows.get(id);
     if (!existing) {
@@ -167,7 +196,12 @@ export class MemoryInspectionRepository implements InspectionRepository {
       ...patch,
       status: (patch.status ?? existing.status) as InspectionStatus,
       updatedAt: isoNow(),
-      finalizedAt: patch.status === 'finalized' ? isoNow() : existing.finalizedAt,
+      finalizedAt:
+        patch.finalizedAt !== undefined
+          ? patch.finalizedAt
+          : patch.status === 'finalized'
+            ? isoNow()
+            : existing.finalizedAt,
     };
     this.rows.set(id, next);
     return next;
@@ -209,6 +243,16 @@ export class MemoryImageRepository implements ImageRepository {
     return this.rows.get(inspectionId) ?? [];
   }
 
+  async getById(id: string): Promise<InspectionImageRecord | null> {
+    for (const list of this.rows.values()) {
+      const match = list.find((row) => row.id === id);
+      if (match) {
+        return match;
+      }
+    }
+    return null;
+  }
+
   async updateQuality(
     imageId: string,
     quality: Pick<ImageQualityResult, 'status' | 'score' | 'issues'> & { metrics?: unknown },
@@ -226,8 +270,42 @@ export class MemoryImageRepository implements ImageRepository {
 }
 
 export class MemoryFindingRepository implements FindingRepository {
-  async listByInspection(): Promise<unknown[]> {
-    return [];
+  readonly findings: FindingDetail[] = [];
+
+  async listByInspection(inspectionId: string): Promise<FindingDetail[]> {
+    return this.findings.filter((finding) => finding.inspectionId === inspectionId);
+  }
+
+  async getDetail(id: string): Promise<FindingDetail | null> {
+    return this.findings.find((finding) => finding.id === id) ?? null;
+  }
+
+  async applyReview(input: {
+    findingId: string;
+    reviewerUserId: string;
+    decision: ReviewDecision;
+    note?: string;
+    editedOutcome?: FindingOutcome;
+    reviewerState: ReviewerState;
+    outcome: FindingOutcome;
+  }): Promise<{ finding: FindingRecord; review: ReviewActionRecord }> {
+    const finding = this.findings.find((row) => row.id === input.findingId);
+    if (!finding) {
+      throw new Error('Finding not found');
+    }
+    const review: ReviewActionRecord = {
+      id: randomUUID(),
+      findingId: input.findingId,
+      reviewerUserId: input.reviewerUserId,
+      decision: input.decision,
+      note: input.note ?? null,
+      editedOutcome: input.editedOutcome ?? null,
+      createdAt: isoNow(),
+    };
+    finding.reviewerState = input.reviewerState;
+    finding.outcome = input.outcome;
+    finding.reviews.push(review);
+    return { finding, review };
   }
 }
 
@@ -351,8 +429,30 @@ export class MemoryRuleProposalRepository implements RuleProposalRepository {
 }
 
 export class MemoryReportRepository implements ReportRepository {
-  async listByInspection(): Promise<unknown[]> {
-    return [];
+  readonly rows: ReportRecord[] = [];
+
+  async listByInspection(inspectionId: string): Promise<ReportRecord[]> {
+    return this.rows.filter((row) => row.inspectionId === inspectionId);
+  }
+
+  async create(input: {
+    inspectionId: string;
+    storageKey: string;
+    generatedByUserId: string;
+  }): Promise<ReportRecord> {
+    const record: ReportRecord = {
+      id: randomUUID(),
+      inspectionId: input.inspectionId,
+      storageKey: input.storageKey,
+      generatedByUserId: input.generatedByUserId,
+      createdAt: isoNow(),
+    };
+    this.rows.push(record);
+    return record;
+  }
+
+  async getById(id: string): Promise<ReportRecord | null> {
+    return this.rows.find((row) => row.id === id) ?? null;
   }
 }
 
@@ -459,7 +559,7 @@ export class MemoryExtractionRepository implements ExtractionRepository {
 }
 
 export class MemoryAuditRepository implements AuditRepository {
-  readonly events: Record<string, unknown>[] = [];
+  readonly events: AuditLogRecord[] = [];
 
   async record(input: {
     actorUserId?: string;
@@ -468,6 +568,44 @@ export class MemoryAuditRepository implements AuditRepository {
     entityId?: string;
     payload?: Record<string, unknown>;
   }): Promise<void> {
-    this.events.push(input);
+    this.events.push({
+      id: randomUUID(),
+      actorUserId: input.actorUserId ?? null,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      payload: input.payload ?? {},
+      createdAt: isoNow(),
+    });
+  }
+
+  async list(filter: AuditListFilter): Promise<Paginated<AuditLogRecord>> {
+    let all = [...this.events].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (filter.actorUserId) {
+      all = all.filter((row) => row.actorUserId === filter.actorUserId);
+    }
+    if (filter.action) {
+      all = all.filter((row) => row.action === filter.action);
+    }
+    if (filter.entityType) {
+      all = all.filter((row) => row.entityType === filter.entityType);
+    }
+    if (filter.entityId) {
+      all = all.filter((row) => row.entityId === filter.entityId);
+    }
+    if (filter.inspectionId) {
+      all = all.filter(
+        (row) =>
+          (row.entityType === 'inspection' && row.entityId === filter.inspectionId) ||
+          row.payload.inspectionId === filter.inspectionId,
+      );
+    }
+    const start = (filter.page - 1) * filter.pageSize;
+    return {
+      items: all.slice(start, start + filter.pageSize),
+      page: filter.page,
+      pageSize: filter.pageSize,
+      total: all.length,
+    };
   }
 }

@@ -32,6 +32,7 @@ export const inspections = pgTable(
     index('inspections_created_by_user_id_idx').on(table.createdByUserId),
     index('inspections_status_idx').on(table.status),
     index('inspections_created_at_idx').on(table.createdAt),
+    index('inspections_overall_outcome_idx').on(table.overallOutcome),
   ],
 );
 

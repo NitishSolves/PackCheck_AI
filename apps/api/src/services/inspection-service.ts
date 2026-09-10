@@ -1,17 +1,19 @@
 import path from 'node:path';
 import {
   canTransitionInspectionStatus,
+  overallOutcomeFrom,
   type InspectionStatus,
   type Paginated,
-  type PaginationQuery,
   type PublicUser,
 } from '@packcheck/shared';
-import { badRequest, forbidden, notFound } from '../errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../errors.js';
 import type {
   AuditRepository,
+  FindingRepository,
   ImageRepository,
   InspectionDetail,
   InspectionImageRecord,
+  InspectionListFilter,
   InspectionRecord,
   InspectionRepository,
 } from '../repositories/types.js';
@@ -26,10 +28,16 @@ export class InspectionService {
     private readonly images: ImageRepository,
     private readonly audit: AuditRepository,
     private readonly storage?: ObjectStorage,
+    private readonly findings?: FindingRepository,
   ) {}
 
-  async list(query: PaginationQuery): Promise<Paginated<InspectionRecord>> {
-    return this.inspections.list(query);
+  async list(
+    query: InspectionListFilter,
+    actor?: PublicUser,
+  ): Promise<Paginated<InspectionRecord>> {
+    const scoped: InspectionListFilter =
+      actor?.role === 'inspector' ? { ...query, createdByUserId: actor.id } : query;
+    return this.inspections.list(scoped);
   }
 
   async getById(id: string): Promise<InspectionDetail> {
@@ -71,8 +79,11 @@ export class InspectionService {
       throw notFound('Inspection not found');
     }
     this.assertCanMutate(actor, existing);
-    if (existing.status === 'finalized' && patch.status && patch.status !== 'finalized') {
-      throw badRequest('Finalized inspections cannot change status');
+    if (existing.status === 'finalized') {
+      throw conflict('Finalized inspections cannot be updated');
+    }
+    if (patch.status === 'finalized') {
+      throw badRequest('Use POST /api/inspections/:id/finalize to finalize an inspection');
     }
     if (patch.status && !canTransitionInspectionStatus(existing.status, patch.status)) {
       throw badRequest('Invalid inspection status transition', {
@@ -158,6 +169,72 @@ export class InspectionService {
       payload: { inspectionId },
     });
     return image;
+  }
+
+  async finalize(actor: PublicUser, id: string): Promise<InspectionRecord> {
+    if (actor.role === 'inspector') {
+      throw forbidden('Inspectors cannot finalize inspections');
+    }
+    this.assertCanInspect(actor);
+    const existing = await this.inspections.getById(id);
+    if (!existing) {
+      throw notFound('Inspection not found');
+    }
+    this.assertCanMutate(actor, existing);
+    if (existing.status === 'finalized') {
+      throw conflict('Inspection is already finalized');
+    }
+    if (existing.status !== 'review_pending') {
+      throw conflict(`Cannot finalize inspection from ${existing.status}`);
+    }
+    if (!this.findings) {
+      throw badRequest('Finding repository is not configured');
+    }
+    const details = await this.findings.listByInspection(id);
+    if (details.some((finding) => finding.evidence.length === 0)) {
+      throw conflict('Every finding must include evidence before finalization');
+    }
+    if (details.some((finding) => finding.reviewerState === 'pending')) {
+      throw conflict('All findings must be reviewed before finalization');
+    }
+    const overallOutcome = overallOutcomeFrom(details);
+    const updated = await this.inspections.update(id, {
+      status: 'finalized',
+      finalizedAt: new Date().toISOString(),
+      overallOutcome,
+    });
+    await this.audit.record({
+      actorUserId: actor.id,
+      action: 'inspection.finalize',
+      entityType: 'inspection',
+      entityId: id,
+      payload: { overallOutcome },
+    });
+    return updated;
+  }
+
+  async reopen(actor: PublicUser, id: string): Promise<InspectionRecord> {
+    if (actor.role !== 'administrator') {
+      throw forbidden('Only administrators can reopen finalized inspections');
+    }
+    const existing = await this.inspections.getById(id);
+    if (!existing) {
+      throw notFound('Inspection not found');
+    }
+    if (existing.status !== 'finalized') {
+      throw conflict('Only finalized inspections can be reopened');
+    }
+    const updated = await this.inspections.update(id, {
+      status: 'review_pending',
+      finalizedAt: null,
+    });
+    await this.audit.record({
+      actorUserId: actor.id,
+      action: 'inspection.reopen',
+      entityType: 'inspection',
+      entityId: id,
+    });
+    return updated;
   }
 
   private assertCanInspect(actor: PublicUser): void {

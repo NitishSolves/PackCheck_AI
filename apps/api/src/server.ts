@@ -19,6 +19,8 @@ import { AuthService } from './services/auth-service.js';
 import { InspectionService } from './services/inspection-service.js';
 import { RegulatoryService } from './services/regulatory-service.js';
 import { ReportService } from './services/report-service.js';
+import { FindingService } from './services/finding-service.js';
+import { AuditService } from './services/audit-service.js';
 import { HttpAiClient } from './services/ai-client.js';
 import { ExtractionService } from './services/extraction-service.js';
 import { durationToMs, HmacJwtSigner } from './plugins/jwt-signer.js';
@@ -50,7 +52,7 @@ const auth = new AuthService(
 );
 
 const ai = new HttpAiClient(env.AI_SERVICE_URL);
-const inspectionService = new InspectionService(inspections, images, audit, storage);
+const inspectionService = new InspectionService(inspections, images, audit, storage, findings);
 const extractionService = new ExtractionService(
   inspections,
   images,
@@ -59,16 +61,28 @@ const extractionService = new ExtractionService(
   ai,
   storage,
 );
+const findingService = new FindingService(findings, inspections, images, audit, storage);
+const reportService = new ReportService(
+  reports,
+  inspections,
+  findings,
+  extractions,
+  images,
+  audit,
+  storage,
+);
+const auditService = new AuditService(audit);
 
 const app = buildApiApp({
   auth,
   inspections: inspectionService,
   regulatory: new RegulatoryService(rules, sources, proposals, versions, audit),
-  reports: new ReportService(reports),
-  findings,
+  reports: reportService,
+  findings: findingService,
   extractions,
   extractionService,
   audit,
+  auditService,
   webOrigin: env.WEB_ORIGIN,
   loginLimiter: new LoginRateLimiter(),
 });

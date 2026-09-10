@@ -1,8 +1,8 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ALLOWED_IMAGE_MIME_TYPES } from '@packcheck/shared';
-import { badRequest } from '../errors.js';
+import { badRequest, notFound } from '../errors.js';
 
 const MIME_EXTENSION: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -19,6 +19,11 @@ export type StoredObject = {
   originalFilename: string;
 };
 
+export type StoredPdf = {
+  storageKey: string;
+  byteSize: number;
+};
+
 export interface ObjectStorage {
   putImage(input: {
     inspectionId: string;
@@ -27,6 +32,8 @@ export interface ObjectStorage {
     bytes: Buffer;
   }): Promise<StoredObject>;
   resolvePath?(storageKey: string): string;
+  read?(storageKey: string): Promise<Buffer>;
+  savePdf?(bytes: Buffer): Promise<StoredPdf>;
 }
 
 export function sanitizeFilename(originalFilename: string): string {
@@ -81,5 +88,24 @@ export class LocalObjectStorage implements ObjectStorage {
       throw badRequest('Invalid storage path');
     }
     return absolute;
+  }
+
+  async read(storageKey: string): Promise<Buffer> {
+    try {
+      return await readFile(this.resolvePath(storageKey));
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        throw notFound('Stored object not found');
+      }
+      throw error;
+    }
+  }
+
+  async savePdf(bytes: Buffer): Promise<StoredPdf> {
+    const storageKey = path.posix.join('reports', `${randomUUID()}.pdf`);
+    const absolute = this.resolvePath(storageKey);
+    await mkdir(path.dirname(absolute), { recursive: true });
+    await writeFile(absolute, bytes);
+    return { storageKey, byteSize: bytes.length };
   }
 }

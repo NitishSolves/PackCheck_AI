@@ -12,6 +12,11 @@ export const boundingBoxSchema = z.object({
 });
 export type BoundingBox = z.infer<typeof boundingBoxSchema>;
 
+export function parseBoundingBox(value: unknown): BoundingBox | null {
+  const parsed = boundingBoxSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export const IMAGE_QUALITY_ISSUE_CODES = [
   'low_resolution',
   'blur',

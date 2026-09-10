@@ -1,8 +1,9 @@
-import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import {
   authSessions,
   auditLogs,
   extractedFields,
+  findingEvidence,
   findings,
   inspectionExtractionRuns,
   inspectionImages,
@@ -12,6 +13,7 @@ import {
   regulatoryRules,
   regulatorySources,
   reports,
+  reviewActions,
   ruleProposals,
   ruleVersions,
   users,
@@ -19,33 +21,44 @@ import {
 } from '@packcheck/db';
 import type {
   ExtractedField,
+  FindingOutcome,
   ImageQualityResult,
   InspectionStatus,
   LayeredConfidence,
   OcrResult,
   PackageClassification,
   Paginated,
-  PaginationQuery,
+  ReviewDecision,
+  ReviewerState,
 } from '@packcheck/shared';
-import { paginateOffset } from '@packcheck/shared';
+import { paginateOffset, parseBoundingBox } from '@packcheck/shared';
 import { notFound } from '../errors.js';
 import type {
+  AuditListFilter,
+  AuditLogRecord,
   AuditRepository,
   ExtractedFieldRecord,
   ExtractionRepository,
   ExtractionRunRecord,
+  FindingDetail,
+  FindingEvidenceRecord,
+  FindingRecord,
   FindingRepository,
+  FindingRuleRecord,
   ImageRepository,
   InspectionDetail,
   InspectionExtractionSnapshot,
   InspectionImageRecord,
+  InspectionListFilter,
   InspectionRecord,
   InspectionRepository,
   OcrResultRecord,
   PackageContextRecord,
   RegulatorySourceRecord,
   RegulatorySourceRepository,
+  ReportRecord,
   ReportRepository,
+  ReviewActionRecord,
   RuleCatalogRecord,
   RuleProposalRecord,
   RuleProposalRepository,
@@ -245,12 +258,30 @@ export class PostgresInspectionRepository implements InspectionRepository {
     return { ...inspection, images: images.map(mapImage) };
   }
 
-  async list(query: PaginationQuery): Promise<Paginated<InspectionRecord>> {
+  async list(query: InspectionListFilter): Promise<Paginated<InspectionRecord>> {
     const { limit, offset } = paginateOffset(query.page, query.pageSize);
-    const [totalRow] = await this.db.select({ value: count() }).from(inspections);
+    const clauses = [];
+    if (query.status) {
+      clauses.push(eq(inspections.status, query.status));
+    }
+    if (query.createdByUserId) {
+      clauses.push(eq(inspections.createdByUserId, query.createdByUserId));
+    }
+    if (query.overallOutcome) {
+      clauses.push(eq(inspections.overallOutcome, query.overallOutcome));
+    }
+    if (query.referenceDateFrom) {
+      clauses.push(gte(inspections.referenceDate, query.referenceDateFrom));
+    }
+    if (query.referenceDateTo) {
+      clauses.push(lte(inspections.referenceDate, query.referenceDateTo));
+    }
+    const where = clauses.length > 0 ? and(...clauses) : undefined;
+    const [totalRow] = await this.db.select({ value: count() }).from(inspections).where(where);
     const rows = await this.db
       .select()
       .from(inspections)
+      .where(where)
       .orderBy(desc(inspections.createdAt))
       .limit(limit)
       .offset(offset);
@@ -264,7 +295,12 @@ export class PostgresInspectionRepository implements InspectionRepository {
 
   async update(
     id: string,
-    patch: Partial<Pick<InspectionRecord, 'referenceDate' | 'locationNote' | 'status'>>,
+    patch: Partial<
+      Pick<
+        InspectionRecord,
+        'referenceDate' | 'locationNote' | 'status' | 'overallOutcome' | 'finalizedAt'
+      >
+    >,
   ): Promise<InspectionRecord> {
     const values: Partial<typeof inspections.$inferInsert> = {
       updatedAt: new Date(),
@@ -275,9 +311,15 @@ export class PostgresInspectionRepository implements InspectionRepository {
     if (patch.locationNote !== undefined) {
       values.locationNote = patch.locationNote;
     }
+    if (patch.overallOutcome !== undefined) {
+      values.overallOutcome = patch.overallOutcome;
+    }
+    if (patch.finalizedAt !== undefined) {
+      values.finalizedAt = patch.finalizedAt ? new Date(patch.finalizedAt) : null;
+    }
     if (patch.status !== undefined) {
       values.status = patch.status;
-      if (patch.status === 'finalized') {
+      if (patch.status === 'finalized' && patch.finalizedAt === undefined) {
         values.finalizedAt = new Date();
       }
     }
@@ -329,6 +371,15 @@ export class PostgresImageRepository implements ImageRepository {
     return rows.map(mapImage);
   }
 
+  async getById(id: string): Promise<InspectionImageRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(inspectionImages)
+      .where(eq(inspectionImages.id, id))
+      .limit(1);
+    return row ? mapImage(row) : null;
+  }
+
   async updateQuality(
     imageId: string,
     quality: Pick<ImageQualityResult, 'status' | 'score' | 'issues'> & { metrics?: unknown },
@@ -345,11 +396,232 @@ export class PostgresImageRepository implements ImageRepository {
   }
 }
 
+function mapFinding(row: typeof findings.$inferSelect): FindingRecord {
+  return {
+    id: row.id,
+    inspectionId: row.inspectionId,
+    ruleVersionId: row.ruleVersionId,
+    outcome: row.outcome as FindingOutcome,
+    engineDecision: row.engineDecision,
+    detectedValue: row.detectedValue,
+    expectedRequirement: row.expectedRequirement,
+    explanation: row.explanation,
+    reviewerState: row.reviewerState as ReviewerState,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapEvidence(row: typeof findingEvidence.$inferSelect): FindingEvidenceRecord {
+  return {
+    id: row.id,
+    findingId: row.findingId,
+    imageId: row.imageId,
+    boundingBox: parseBoundingBox(row.boundingBox),
+    extractedFieldKey: row.extractedFieldKey,
+    ocrSnippet: row.ocrSnippet,
+    cropStorageKey: row.cropStorageKey,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapReview(row: typeof reviewActions.$inferSelect): ReviewActionRecord {
+  return {
+    id: row.id,
+    findingId: row.findingId,
+    reviewerUserId: row.reviewerUserId,
+    decision: row.decision as ReviewDecision,
+    note: row.note,
+    editedOutcome: (row.editedOutcome as FindingOutcome | null) ?? null,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapFindingRule(row: typeof regulatoryRules.$inferSelect): FindingRuleRecord {
+  return {
+    id: row.id,
+    ruleCode: row.ruleCode,
+    title: row.title,
+    ruleNumber: row.ruleNumber,
+    clauseReference: row.clauseReference,
+  };
+}
+
+function mapFindingRuleVersion(row: typeof ruleVersions.$inferSelect): RuleVersionRecord {
+  return {
+    id: row.id,
+    ruleId: row.ruleId,
+    versionNumber: row.versionNumber,
+    sourceId: row.sourceId,
+    clauseReference: row.clauseReference,
+    requirementText: row.requirementText,
+    status: row.status,
+    effectiveFrom: asDate(row.effectiveFrom),
+    effectiveTo: row.effectiveTo ? asDate(row.effectiveTo) : null,
+  };
+}
+
+function mapFindingSource(row: typeof regulatorySources.$inferSelect): RegulatorySourceRecord {
+  return {
+    id: row.id,
+    title: row.title,
+    sourceType: row.sourceType,
+    issuingAuthority: row.issuingAuthority,
+    officialUrl: row.officialUrl,
+    documentHash: row.documentHash,
+    publicationDate: row.publicationDate ? asDate(row.publicationDate) : null,
+    effectiveDate: row.effectiveDate ? asDate(row.effectiveDate) : null,
+    verificationStatus: row.verificationStatus,
+    retrievedAt: asIso(row.retrievedAt),
+  };
+}
+
+function mapReport(row: typeof reports.$inferSelect): ReportRecord {
+  return {
+    id: row.id,
+    inspectionId: row.inspectionId,
+    storageKey: row.storageKey,
+    generatedByUserId: row.generatedByUserId,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function mapAudit(row: typeof auditLogs.$inferSelect): AuditLogRecord {
+  return {
+    id: row.id,
+    actorUserId: row.actorUserId,
+    action: row.action,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    payload: (row.payload ?? {}) as Record<string, unknown>,
+    createdAt: asIso(row.createdAt) ?? new Date().toISOString(),
+  };
+}
+
 export class PostgresFindingRepository implements FindingRepository {
   constructor(private readonly db: Database) {}
 
-  async listByInspection(inspectionId: string): Promise<unknown[]> {
-    return this.db.select().from(findings).where(eq(findings.inspectionId, inspectionId));
+  async listByInspection(inspectionId: string): Promise<FindingDetail[]> {
+    const rows = await this.db
+      .select()
+      .from(findings)
+      .where(eq(findings.inspectionId, inspectionId))
+      .orderBy(desc(findings.createdAt));
+    return this.hydrate(rows);
+  }
+
+  async getDetail(id: string): Promise<FindingDetail | null> {
+    const rows = await this.db.select().from(findings).where(eq(findings.id, id)).limit(1);
+    if (!rows[0]) {
+      return null;
+    }
+    const [detail] = await this.hydrate(rows);
+    return detail ?? null;
+  }
+
+  async applyReview(input: {
+    findingId: string;
+    reviewerUserId: string;
+    decision: ReviewDecision;
+    note?: string;
+    editedOutcome?: FindingOutcome;
+    reviewerState: ReviewerState;
+    outcome: FindingOutcome;
+  }): Promise<{ finding: FindingRecord; review: ReviewActionRecord }> {
+    return this.db.transaction(async (tx) => {
+      const [reviewRow] = await tx
+        .insert(reviewActions)
+        .values({
+          findingId: input.findingId,
+          reviewerUserId: input.reviewerUserId,
+          decision: input.decision,
+          note: input.note,
+          editedOutcome: input.editedOutcome,
+        })
+        .returning();
+      if (!reviewRow) {
+        throw new Error('Failed to record review action');
+      }
+      const [findingRow] = await tx
+        .update(findings)
+        .set({
+          reviewerState: input.reviewerState,
+          outcome: input.outcome,
+        })
+        .where(eq(findings.id, input.findingId))
+        .returning();
+      if (!findingRow) {
+        throw new Error('Finding not found');
+      }
+      return { finding: mapFinding(findingRow), review: mapReview(reviewRow) };
+    });
+  }
+
+  private async hydrate(rows: (typeof findings.$inferSelect)[]): Promise<FindingDetail[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+    const findingIds = rows.map((row) => row.id);
+    const versionIds = [...new Set(rows.map((row) => row.ruleVersionId))];
+    const [evidenceRows, reviewRows, versionRows] = await Promise.all([
+      this.db
+        .select()
+        .from(findingEvidence)
+        .where(inArray(findingEvidence.findingId, findingIds))
+        .orderBy(findingEvidence.createdAt),
+      this.db
+        .select()
+        .from(reviewActions)
+        .where(inArray(reviewActions.findingId, findingIds))
+        .orderBy(reviewActions.createdAt),
+      this.db.select().from(ruleVersions).where(inArray(ruleVersions.id, versionIds)),
+    ]);
+    const ruleIds = [...new Set(versionRows.map((row) => row.ruleId))];
+    const sourceIds = [...new Set(versionRows.map((row) => row.sourceId))];
+    const [ruleRows, sourceRows] = await Promise.all([
+      ruleIds.length > 0
+        ? this.db.select().from(regulatoryRules).where(inArray(regulatoryRules.id, ruleIds))
+        : Promise.resolve([]),
+      sourceIds.length > 0
+        ? this.db.select().from(regulatorySources).where(inArray(regulatorySources.id, sourceIds))
+        : Promise.resolve([]),
+    ]);
+    const versionsById = new Map(versionRows.map((row) => [row.id, mapFindingRuleVersion(row)]));
+    const rulesById = new Map(ruleRows.map((row) => [row.id, mapFindingRule(row)]));
+    const sourcesById = new Map(sourceRows.map((row) => [row.id, mapFindingSource(row)]));
+    const evidenceByFinding = new Map<string, FindingEvidenceRecord[]>();
+    for (const row of evidenceRows) {
+      const list = evidenceByFinding.get(row.findingId) ?? [];
+      list.push(mapEvidence(row));
+      evidenceByFinding.set(row.findingId, list);
+    }
+    const reviewsByFinding = new Map<string, ReviewActionRecord[]>();
+    for (const row of reviewRows) {
+      const list = reviewsByFinding.get(row.findingId) ?? [];
+      list.push(mapReview(row));
+      reviewsByFinding.set(row.findingId, list);
+    }
+    return rows.map((row) => {
+      const ruleVersion = versionsById.get(row.ruleVersionId);
+      if (!ruleVersion) {
+        throw new Error(`Missing rule version ${row.ruleVersionId} for finding ${row.id}`);
+      }
+      const rule = rulesById.get(ruleVersion.ruleId);
+      if (!rule) {
+        throw new Error(`Missing rule ${ruleVersion.ruleId} for finding ${row.id}`);
+      }
+      const source = sourcesById.get(ruleVersion.sourceId);
+      if (!source) {
+        throw new Error(`Missing source ${ruleVersion.sourceId} for finding ${row.id}`);
+      }
+      return {
+        ...mapFinding(row),
+        evidence: evidenceByFinding.get(row.id) ?? [],
+        reviews: reviewsByFinding.get(row.id) ?? [],
+        rule,
+        ruleVersion,
+        source,
+      };
+    });
   }
 }
 
@@ -590,8 +862,37 @@ export class PostgresRuleProposalRepository implements RuleProposalRepository {
 export class PostgresReportRepository implements ReportRepository {
   constructor(private readonly db: Database) {}
 
-  async listByInspection(inspectionId: string): Promise<unknown[]> {
-    return this.db.select().from(reports).where(eq(reports.inspectionId, inspectionId));
+  async listByInspection(inspectionId: string): Promise<ReportRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(reports)
+      .where(eq(reports.inspectionId, inspectionId))
+      .orderBy(desc(reports.createdAt));
+    return rows.map(mapReport);
+  }
+
+  async create(input: {
+    inspectionId: string;
+    storageKey: string;
+    generatedByUserId: string;
+  }): Promise<ReportRecord> {
+    const [row] = await this.db
+      .insert(reports)
+      .values({
+        inspectionId: input.inspectionId,
+        storageKey: input.storageKey,
+        generatedByUserId: input.generatedByUserId,
+      })
+      .returning();
+    if (!row) {
+      throw new Error('Failed to create report');
+    }
+    return mapReport(row);
+  }
+
+  async getById(id: string): Promise<ReportRecord | null> {
+    const [row] = await this.db.select().from(reports).where(eq(reports.id, id)).limit(1);
+    return row ? mapReport(row) : null;
   }
 }
 
@@ -833,5 +1134,45 @@ export class PostgresAuditRepository implements AuditRepository {
       entityId: input.entityId,
       payload: input.payload ?? {},
     });
+  }
+
+  async list(filter: AuditListFilter): Promise<Paginated<AuditLogRecord>> {
+    const { limit, offset } = paginateOffset(filter.page, filter.pageSize);
+    const clauses = [];
+    if (filter.actorUserId) {
+      clauses.push(eq(auditLogs.actorUserId, filter.actorUserId));
+    }
+    if (filter.action) {
+      clauses.push(eq(auditLogs.action, filter.action));
+    }
+    if (filter.entityType) {
+      clauses.push(eq(auditLogs.entityType, filter.entityType));
+    }
+    if (filter.entityId) {
+      clauses.push(eq(auditLogs.entityId, filter.entityId));
+    }
+    if (filter.inspectionId) {
+      clauses.push(
+        or(
+          and(eq(auditLogs.entityType, 'inspection'), eq(auditLogs.entityId, filter.inspectionId)),
+          sql`${auditLogs.payload} ->> 'inspectionId' = ${filter.inspectionId}`,
+        ),
+      );
+    }
+    const where = clauses.length > 0 ? and(...clauses) : undefined;
+    const [totalRow] = await this.db.select({ value: count() }).from(auditLogs).where(where);
+    const rows = await this.db
+      .select()
+      .from(auditLogs)
+      .where(where)
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(limit)
+      .offset(offset);
+    return {
+      items: rows.map(mapAudit),
+      page: filter.page,
+      pageSize: filter.pageSize,
+      total: Number(totalRow?.value ?? 0),
+    };
   }
 }

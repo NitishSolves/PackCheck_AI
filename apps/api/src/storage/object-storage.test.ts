@@ -34,5 +34,16 @@ describe('object storage', () => {
     );
     const written = await readFile(path.join(dir, stored.storageKey));
     expect(written.length).toBe(3);
+    const roundTrip = await storage.read(stored.storageKey);
+    expect(roundTrip.equals(written)).toBe(true);
+  });
+
+  it('saves PDF bytes under the reports prefix', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'packcheck-storage-'));
+    const storage = new LocalObjectStorage(dir);
+    const stored = await storage.savePdf(Buffer.from('%PDF-1.4 test'));
+    expect(stored.storageKey.startsWith('reports/')).toBe(true);
+    const written = await storage.read(stored.storageKey);
+    expect(written.toString()).toContain('%PDF-1.4');
   });
 });
