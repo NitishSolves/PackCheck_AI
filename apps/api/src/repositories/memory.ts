@@ -280,6 +280,94 @@ export class MemoryFindingRepository implements FindingRepository {
     return this.findings.find((finding) => finding.id === id) ?? null;
   }
 
+  async saveInspectionFindings(
+    inspectionId: string,
+    items: Array<{
+      ruleVersionId: string;
+      outcome: FindingOutcome;
+      engineDecision: string;
+      detectedValue: string | null;
+      expectedRequirement: string;
+      explanation: string;
+      reviewerState?: ReviewerState;
+      evidence: Array<{
+        imageId: string;
+        boundingBox: any;
+        extractedFieldKey: string | null;
+        ocrSnippet: string | null;
+        cropStorageKey?: string | null;
+      }>;
+    }>,
+  ): Promise<FindingDetail[]> {
+    // Remove existing
+    for (let i = this.findings.length - 1; i >= 0; i--) {
+      if (this.findings[i]?.inspectionId === inspectionId) {
+        this.findings.splice(i, 1);
+      }
+    }
+
+    const created: FindingDetail[] = [];
+    for (const item of items) {
+      const findingId = randomUUID();
+      const finding: FindingDetail = {
+        id: findingId,
+        inspectionId,
+        ruleVersionId: item.ruleVersionId,
+        outcome: item.outcome,
+        engineDecision: item.engineDecision,
+        detectedValue: item.detectedValue,
+        expectedRequirement: item.expectedRequirement,
+        explanation: item.explanation,
+        reviewerState: item.reviewerState ?? 'pending',
+        createdAt: isoNow(),
+        evidence: item.evidence.map((ev) => ({
+          id: randomUUID(),
+          findingId,
+          imageId: ev.imageId,
+          boundingBox: ev.boundingBox,
+          extractedFieldKey: ev.extractedFieldKey,
+          ocrSnippet: ev.ocrSnippet,
+          cropStorageKey: ev.cropStorageKey ?? null,
+          createdAt: isoNow(),
+        })),
+        reviews: [],
+        rule: {
+          id: randomUUID(),
+          ruleCode: 'R01',
+          title: 'Mandatory Declaration',
+          ruleNumber: null,
+          clauseReference: null,
+        },
+        ruleVersion: {
+          id: item.ruleVersionId,
+          ruleId: randomUUID(),
+          versionNumber: 1,
+          sourceId: randomUUID(),
+          clauseReference: 'Rule 6(1)',
+          requirementText: item.expectedRequirement,
+          status: 'active',
+          effectiveFrom: '2011-04-01',
+          effectiveTo: null,
+        },
+        source: {
+          id: randomUUID(),
+          title: 'LMPC Rules 2011',
+          sourceType: 'rules',
+          issuingAuthority: 'DCA',
+          officialUrl: 'https://consumeraffairs.nic.in',
+          documentHash: null,
+          publicationDate: null,
+          effectiveDate: '2011-04-01',
+          verificationStatus: 'verified',
+          retrievedAt: null,
+        },
+      };
+      this.findings.push(finding);
+      created.push(finding);
+    }
+    return created;
+  }
+
   async applyReview(input: {
     findingId: string;
     reviewerUserId: string;
@@ -370,6 +458,29 @@ export class MemoryRuleVersionRepository implements RuleVersionRepository {
 
   async listByRule(ruleId: string): Promise<RuleVersionRecord[]> {
     return this.rows.filter((row) => row.ruleId === ruleId);
+  }
+
+  async listActiveVersions(referenceDate?: string): Promise<any[]> {
+    return this.rows
+      .filter((row) => row.status === 'active')
+      .map((row) => ({
+        id: row.id,
+        ruleId: row.ruleId,
+        ruleCode: 'R01',
+        versionNumber: row.versionNumber,
+        sourceId: row.sourceId,
+        clauseReference: row.clauseReference,
+        requirementText: row.requirementText,
+        applicability: {},
+        conditions: {},
+        exceptions: {},
+        validationType: 'FIELD_REQUIRED',
+        validationConfig: { fieldKey: 'manufacturer' },
+        severity: 'high',
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+        status: row.status,
+      }));
   }
 
   async create(input: {

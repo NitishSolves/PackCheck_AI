@@ -60,6 +60,8 @@ const extractionService = new ExtractionService(
   audit,
   ai,
   storage,
+  findings,
+  versions,
 );
 const findingService = new FindingService(findings, inspections, images, audit, storage);
 const reportService = new ReportService(

@@ -296,9 +296,47 @@ export interface ImageRepository {
   ): Promise<void>;
 }
 
+export type ActiveRuleVersionRecord = {
+  id: string;
+  ruleId: string;
+  ruleCode: string;
+  versionNumber: number;
+  sourceId: string;
+  clauseReference: string | null;
+  requirementText: string;
+  applicability: Record<string, unknown>;
+  conditions: Record<string, unknown>;
+  exceptions: Record<string, unknown>;
+  validationType: string;
+  validationConfig: Record<string, unknown>;
+  severity: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  status: string;
+};
+
 export interface FindingRepository {
   listByInspection(inspectionId: string): Promise<FindingDetail[]>;
   getDetail(id: string): Promise<FindingDetail | null>;
+  saveInspectionFindings?(
+    inspectionId: string,
+    items: Array<{
+      ruleVersionId: string;
+      outcome: FindingOutcome;
+      engineDecision: string;
+      detectedValue: string | null;
+      expectedRequirement: string;
+      explanation: string;
+      reviewerState?: ReviewerState;
+      evidence: Array<{
+        imageId: string;
+        boundingBox: BoundingBox | null;
+        extractedFieldKey: string | null;
+        ocrSnippet: string | null;
+        cropStorageKey?: string | null;
+      }>;
+    }>,
+  ): Promise<FindingDetail[]>;
   applyReview(input: {
     findingId: string;
     reviewerUserId: string;
@@ -331,6 +369,7 @@ export interface RegulatorySourceRepository {
 
 export interface RuleVersionRepository {
   listByRule(ruleId: string): Promise<RuleVersionRecord[]>;
+  listActiveVersions?(referenceDate?: string): Promise<ActiveRuleVersionRecord[]>;
   create(input: {
     ruleId: string;
     sourceId: string;

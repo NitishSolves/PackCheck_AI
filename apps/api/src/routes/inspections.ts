@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import '@fastify/multipart';
 import {
   auditListQuerySchema,
   createInspectionBodySchema,
@@ -70,6 +71,39 @@ export function registerInspectionRoutes(
 
   app.post('/api/inspections/:id/images', async (request, reply) => {
     const params = idParams.parse(request.params);
+    if (request.isMultipart()) {
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ message: 'No file uploaded' });
+      }
+      const buffer = await data.toBuffer();
+      const image = await deps.inspections.registerImage(request.authUser, params.id, {
+        originalFilename: data.filename || 'specimen.jpg',
+        mimeType: data.mimetype || 'image/jpeg',
+        bytes: buffer,
+      });
+      return reply.code(201).send(image);
+    }
+    const body = registerImageBodySchema.parse(request.body);
+    const image = await deps.inspections.registerImage(request.authUser, params.id, body);
+    return reply.code(201).send(image);
+  });
+
+  app.post('/api/inspections/:id/upload', async (request, reply) => {
+    const params = idParams.parse(request.params);
+    if (request.isMultipart()) {
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ message: 'No file uploaded' });
+      }
+      const buffer = await data.toBuffer();
+      const image = await deps.inspections.registerImage(request.authUser, params.id, {
+        originalFilename: data.filename || 'specimen.jpg',
+        mimeType: data.mimetype || 'image/jpeg',
+        bytes: buffer,
+      });
+      return reply.code(201).send(image);
+    }
     const body = registerImageBodySchema.parse(request.body);
     const image = await deps.inspections.registerImage(request.authUser, params.id, body);
     return reply.code(201).send(image);

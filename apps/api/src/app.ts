@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyMultipart from '@fastify/multipart';
 import type { InspectionService } from './services/inspection-service.js';
 import type { RegulatoryService } from './services/regulatory-service.js';
 import type { AuthService } from './services/auth-service.js';
@@ -37,6 +38,7 @@ export function buildApiApp(deps: AppDeps) {
   });
 
   void app.register(cors, { origin: deps.webOrigin, credentials: true });
+  void app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
   registerErrorHandler(app);
   registerAuthHooks(app, deps.auth);
 

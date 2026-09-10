@@ -70,6 +70,8 @@ export async function createTestApp(users: UserRecord[] = []) {
     audit,
     new HttpAiClient(process.env.AI_SERVICE_URL ?? 'http://127.0.0.1:9'),
     storage,
+    findings,
+    versions,
   );
   const findingService = new FindingService(findings, inspections, images, audit, storage);
   const reportService = new ReportService(

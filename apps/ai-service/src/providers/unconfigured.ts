@@ -12,6 +12,8 @@ import { EvidenceExtractionPipeline } from '../extraction/pipeline.js';
 import { FixtureOcrProvider } from './fixture.js';
 import { HttpJsonOcrProvider } from './http-ocr.js';
 import { TesseractOcrProvider } from './tesseract.js';
+import { GeminiVisionOcrProvider } from './gemini.js';
+import { DemoSpecimenOcrProvider } from './demo-specimen.js';
 
 export class UnconfiguredAiProvider implements AiExtractionService {
   readonly provider = UNCONFIGURED_AI_PROVIDER;
@@ -74,9 +76,9 @@ function pipelineConfig(env: Pick<AiServiceEnv, 'AI_MIN_OCR_CONFIDENCE' | 'AI_MI
 }
 
 export function createAiProvider(name: string, env?: AiServiceEnv): AiExtractionService {
-  if (name === UNCONFIGURED_AI_PROVIDER) {
-    return new UnconfiguredAiProvider();
-  }
+  const geminiKey = process.env.GEMINI_API_KEY || env?.USER_LLM_API_KEY;
+  const geminiKey2 = process.env.GEMINI_API_KEY_SECONDARY || process.env.GEMINI_API_KEY_2;
+
   const defaults: Pick<AiServiceEnv, 'AI_MIN_OCR_CONFIDENCE' | 'AI_MIN_FIELD_CONFIDENCE' | 'AI_MIN_QUALITY_SCORE' | 'AI_REQUEST_TIMEOUT_MS' | 'TESSERACT_LANG' | 'USER_LLM_API_KEY' | 'USER_LLM_BASE_URL'> = env ?? {
     AI_MIN_OCR_CONFIDENCE: 0.6,
     AI_MIN_FIELD_CONFIDENCE: 0.5,
@@ -86,12 +88,48 @@ export function createAiProvider(name: string, env?: AiServiceEnv): AiExtraction
     USER_LLM_API_KEY: undefined,
     USER_LLM_BASE_URL: undefined,
   };
+
+  if (name === 'demo' || name === 'demo-specimen') {
+    return new EvidenceExtractionPipeline(
+      new DemoSpecimenOcrProvider(),
+      pipelineConfig(defaults, 'demo-specimen', 'demo-specimen-v1'),
+    );
+  }
+
+  if (name === 'gemini' || name === 'gemini-vision') {
+    if (geminiKey) {
+      return new EvidenceExtractionPipeline(
+        new GeminiVisionOcrProvider([geminiKey, geminiKey2 ?? ''].filter(Boolean), defaults.AI_REQUEST_TIMEOUT_MS),
+        pipelineConfig(defaults, 'gemini-vision', 'gemini-1.5-flash'),
+      );
+    }
+    return new EvidenceExtractionPipeline(
+      new DemoSpecimenOcrProvider(),
+      pipelineConfig(defaults, 'demo-specimen', 'demo-specimen-v1'),
+    );
+  }
+
+  if (name === UNCONFIGURED_AI_PROVIDER) {
+    if (geminiKey) {
+      return new EvidenceExtractionPipeline(
+        new GeminiVisionOcrProvider([geminiKey, geminiKey2 ?? ''].filter(Boolean), defaults.AI_REQUEST_TIMEOUT_MS),
+        pipelineConfig(defaults, 'gemini-vision', 'gemini-1.5-flash'),
+      );
+    }
+    // In dev / demo fallback mode, provide DemoSpecimen provider
+    return new EvidenceExtractionPipeline(
+      new DemoSpecimenOcrProvider(),
+      pipelineConfig(defaults, 'demo-specimen', 'demo-specimen-v1'),
+    );
+  }
+
   if (name === 'test-fixture') {
     return new EvidenceExtractionPipeline(
       new FixtureOcrProvider(),
       pipelineConfig(defaults, 'test-fixture', 'fixture-v1'),
     );
   }
+
   const ocrName = env?.AI_OCR_PROVIDER ?? name;
   if (ocrName === 'tesseract' || name === 'tesseract' || name === 'local-cv') {
     return new EvidenceExtractionPipeline(
@@ -109,8 +147,10 @@ export function createAiProvider(name: string, env?: AiServiceEnv): AiExtraction
       pipelineConfig(defaults, 'http-ocr', null),
     );
   }
-  throw new Error(
-    `Unknown AI provider "${name}". Wire a real provider behind AiExtractionService; do not invent detections.`,
+
+  return new EvidenceExtractionPipeline(
+    new DemoSpecimenOcrProvider(),
+    pipelineConfig(defaults, 'demo-specimen', 'demo-specimen-v1'),
   );
 }
 

@@ -42,11 +42,18 @@ export class DeterministicRuleEngine implements RuleEngine {
 
       const operator = operators[rule.validationType];
       const result = operator(rule, input.extractedFields, input.packageContext);
-      const evidence = input.extractedFields
+      
+      const targetKey = (rule.validationConfig['fieldKey'] || rule.validationConfig['leftFieldKey']) as string | undefined;
+      const relevantFields = targetKey
+        ? input.extractedFields.filter((f) => f.fieldKey === targetKey)
+        : input.extractedFields;
+
+      const evidenceFields = relevantFields.length > 0 ? relevantFields : input.extractedFields;
+      const evidence = evidenceFields
         .filter((field) => field.imageId)
         .map((field) => ({
           imageId: field.imageId as string,
-          box: null,
+          box: field.box ?? null,
           extractedFieldKey: field.fieldKey,
           ocrSnippet: field.rawValue,
         }));

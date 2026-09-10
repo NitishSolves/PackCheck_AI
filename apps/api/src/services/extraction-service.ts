@@ -2,16 +2,20 @@ import path from 'node:path';
 import {
   AiProviderError,
   canTransitionInspectionStatus,
+  overallOutcomeFrom,
   type InspectionExtractionResult,
   type PublicUser,
 } from '@packcheck/shared';
+import { DeterministicRuleEngine } from '@packcheck/rule-engine';
 import { badRequest, forbidden, notFound, serviceUnavailable, unprocessable, gatewayTimeout } from '../errors.js';
 import type {
   AuditRepository,
   ExtractionRepository,
+  FindingRepository,
   ImageRepository,
   InspectionRecord,
   InspectionRepository,
+  RuleVersionRepository,
 } from '../repositories/types.js';
 import type { ObjectStorage } from '../storage/object-storage.js';
 
@@ -48,6 +52,8 @@ export class ExtractionService {
     private readonly audit: AuditRepository,
     private readonly ai: InspectionExtractorClient,
     private readonly storage?: ObjectStorage,
+    private readonly findings?: FindingRepository,
+    private readonly ruleVersions?: RuleVersionRepository,
   ) {}
 
   async runForInspection(actor: PublicUser, inspectionId: string) {
@@ -117,11 +123,53 @@ export class ExtractionService {
       packageClassification: result.packageClassification,
     });
 
-    const nextStatus = result.images.some((image) => image.quality.status === 'retake_required')
-      ? 'quality_failed'
-      : 'extraction_review';
-    if (canTransitionInspectionStatus('extracting', nextStatus)) {
-      await this.inspections.update(inspectionId, { status: nextStatus });
+    // Deterministic Rule Engine Evaluation
+    if (this.findings?.saveInspectionFindings && this.ruleVersions?.listActiveVersions) {
+      const activeRules = await this.ruleVersions.listActiveVersions(inspection.referenceDate);
+      if (activeRules.length > 0) {
+        const engine = new DeterministicRuleEngine();
+        const ruleEngineResult = engine.evaluate({
+          referenceDate: inspection.referenceDate,
+          packageContext: (result.packageClassification?.flags as unknown as Record<string, unknown>) ?? {},
+          extractedFields: result.fields,
+          selectedRuleVersions: activeRules as any,
+        });
+
+        await this.findings.saveInspectionFindings(
+          inspectionId,
+          ruleEngineResult.findings.map((f) => ({
+            ruleVersionId: f.ruleVersionId,
+            outcome: f.outcome,
+            engineDecision: f.decision,
+            detectedValue: f.detectedValue,
+            expectedRequirement: f.expectedRequirement,
+            explanation: f.explanation,
+            reviewerState: 'pending',
+            evidence: f.evidence.map((ev) => ({
+              imageId: ev.imageId,
+              boundingBox: ev.box as any,
+              extractedFieldKey: ev.extractedFieldKey,
+              ocrSnippet: ev.ocrSnippet,
+              cropStorageKey: null,
+            })),
+          })),
+        );
+
+        const overall = overallOutcomeFrom(ruleEngineResult.findings);
+        if (overall) {
+          await this.inspections.update(inspectionId, {
+            overallOutcome: overall,
+            status: 'review_pending',
+          });
+        }
+      }
+    } else {
+      const nextStatus = result.images.some((image) => image.quality.status === 'retake_required')
+        ? 'quality_failed'
+        : 'extraction_review';
+      if (canTransitionInspectionStatus('extracting', nextStatus)) {
+        await this.inspections.update(inspectionId, { status: nextStatus });
+      }
     }
 
     await this.audit.record({

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ENGINE_DECISIONS, FINDING_OUTCOMES } from '../domain/outcomes.js';
 import { VALIDATION_OPERATORS } from '../domain/regulatory.js';
+import { boundingBoxSchema } from './ai.js';
 
 export const evidenceRefSchema = z.object({
   imageId: z.string().uuid(),
@@ -30,7 +31,7 @@ export const ruleEngineFindingSchema = z.object({
 export type RuleEngineFinding = z.infer<typeof ruleEngineFindingSchema>;
 
 export const ruleEngineInputSchema = z.object({
-  inspectionId: z.string().uuid(),
+  inspectionId: z.string().uuid().optional(),
   referenceDate: z.string(),
   packageContext: z.record(z.unknown()),
   extractedFields: z.array(
@@ -41,6 +42,7 @@ export const ruleEngineInputSchema = z.object({
       confidence: z.number(),
       panel: z.string().nullable(),
       imageId: z.string().uuid().nullable(),
+      box: boundingBoxSchema.nullable().optional(),
       needsReview: z.boolean(),
     }),
   ),

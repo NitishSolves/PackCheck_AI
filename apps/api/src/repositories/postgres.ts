@@ -34,6 +34,7 @@ import type {
 import { paginateOffset, parseBoundingBox } from '@packcheck/shared';
 import { notFound } from '../errors.js';
 import type {
+  ActiveRuleVersionRecord,
   AuditListFilter,
   AuditLogRecord,
   AuditRepository,
@@ -518,6 +519,76 @@ export class PostgresFindingRepository implements FindingRepository {
     return detail ?? null;
   }
 
+  async saveInspectionFindings(
+    inspectionId: string,
+    items: Array<{
+      ruleVersionId: string;
+      outcome: FindingOutcome;
+      engineDecision: string;
+      detectedValue: string | null;
+      expectedRequirement: string;
+      explanation: string;
+      reviewerState?: ReviewerState;
+      evidence: Array<{
+        imageId: string;
+        boundingBox: any;
+        extractedFieldKey: string | null;
+        ocrSnippet: string | null;
+        cropStorageKey?: string | null;
+      }>;
+    }>,
+  ): Promise<FindingDetail[]> {
+    return this.db.transaction(async (tx) => {
+      const existing = await tx.select({ id: findings.id }).from(findings).where(eq(findings.inspectionId, inspectionId));
+      if (existing.length > 0) {
+        const existingIds = existing.map((r) => r.id);
+        await tx.delete(findingEvidence).where(inArray(findingEvidence.findingId, existingIds));
+        await tx.delete(reviewActions).where(inArray(reviewActions.findingId, existingIds));
+        await tx.delete(findings).where(eq(findings.inspectionId, inspectionId));
+      }
+
+      if (items.length === 0) {
+        return [];
+      }
+
+      for (const item of items) {
+        const [insertedFinding] = await tx
+          .insert(findings)
+          .values({
+            inspectionId,
+            ruleVersionId: item.ruleVersionId,
+            outcome: item.outcome,
+            engineDecision: item.engineDecision,
+            detectedValue: item.detectedValue,
+            expectedRequirement: item.expectedRequirement,
+            explanation: item.explanation,
+            reviewerState: item.reviewerState ?? 'pending',
+          })
+          .returning();
+
+        if (insertedFinding && item.evidence.length > 0) {
+          for (const ev of item.evidence) {
+            await tx.insert(findingEvidence).values({
+              findingId: insertedFinding.id,
+              imageId: ev.imageId,
+              boundingBox: ev.boundingBox,
+              extractedFieldKey: ev.extractedFieldKey,
+              ocrSnippet: ev.ocrSnippet,
+              cropStorageKey: ev.cropStorageKey ?? null,
+            });
+          }
+        }
+      }
+
+      const rows = await tx
+        .select()
+        .from(findings)
+        .where(eq(findings.inspectionId, inspectionId))
+        .orderBy(desc(findings.createdAt));
+      return this.hydrate(rows);
+    });
+  }
+
   async applyReview(input: {
     findingId: string;
     reviewerUserId: string;
@@ -762,6 +833,50 @@ export class PostgresRuleVersionRepository implements RuleVersionRepository {
       status: row.status,
       effectiveFrom: asDate(row.effectiveFrom),
       effectiveTo: row.effectiveTo ? asDate(row.effectiveTo) : null,
+    }));
+  }
+
+  async listActiveVersions(referenceDate?: string): Promise<ActiveRuleVersionRecord[]> {
+    const rows = await this.db
+      .select({
+        id: ruleVersions.id,
+        ruleId: ruleVersions.ruleId,
+        ruleCode: regulatoryRules.ruleCode,
+        versionNumber: ruleVersions.versionNumber,
+        sourceId: ruleVersions.sourceId,
+        clauseReference: ruleVersions.clauseReference,
+        requirementText: ruleVersions.requirementText,
+        applicability: ruleVersions.applicability,
+        conditions: ruleVersions.conditions,
+        exceptions: ruleVersions.exceptions,
+        validationType: ruleVersions.validationType,
+        validationConfig: ruleVersions.validationConfig,
+        severity: ruleVersions.severity,
+        effectiveFrom: ruleVersions.effectiveFrom,
+        effectiveTo: ruleVersions.effectiveTo,
+        status: ruleVersions.status,
+      })
+      .from(ruleVersions)
+      .innerJoin(regulatoryRules, eq(ruleVersions.ruleId, regulatoryRules.id))
+      .where(eq(ruleVersions.status, 'active'));
+
+    return rows.map((r) => ({
+      id: r.id,
+      ruleId: r.ruleId,
+      ruleCode: r.ruleCode,
+      versionNumber: r.versionNumber,
+      sourceId: r.sourceId,
+      clauseReference: r.clauseReference,
+      requirementText: r.requirementText,
+      applicability: (r.applicability as Record<string, unknown>) ?? {},
+      conditions: (r.conditions as Record<string, unknown>) ?? {},
+      exceptions: (r.exceptions as Record<string, unknown>) ?? {},
+      validationType: r.validationType,
+      validationConfig: (r.validationConfig as Record<string, unknown>) ?? {},
+      severity: r.severity,
+      effectiveFrom: asDate(r.effectiveFrom),
+      effectiveTo: r.effectiveTo ? asDate(r.effectiveTo) : null,
+      status: r.status,
     }));
   }
 
